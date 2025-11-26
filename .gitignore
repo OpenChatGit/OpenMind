@@ -28,3 +28,12 @@ data/
 *.njsproj
 *.sln
 *.sw?
+
+# Large model files
+models/Qwen3-4B-Thinking-2507/
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
