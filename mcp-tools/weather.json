@@ -1,0 +1,19 @@
+{
+  "name": "Weather",
+  "description": "Get current weather information for any city. Returns temperature, humidity, wind speed, and conditions.",
+  "enabled": false,
+  "command": "node",
+  "args": [
+    "weather.js"
+  ],
+  "env": {},
+  "parameters": {
+    "city": {
+      "type": "string",
+      "description": "The city name to get weather for (e.g., 'Berlin', 'New York', 'Tokyo')"
+    }
+  },
+  "required": [
+    "city"
+  ]
+}

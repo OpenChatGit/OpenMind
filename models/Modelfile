@@ -1,0 +1,37 @@
+# OpenChat Qwen3-4B with optimized reasoning
+# This model has reasoning rules baked into its system prompt
+
+# Use the official Qwen3 4B model from Ollama registry
+FROM qwen3:4b
+
+# Model parameters optimized for concise reasoning
+PARAMETER temperature 0.7
+PARAMETER top_k 40
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.8
+PARAMETER repeat_last_n 256
+PARAMETER num_predict 2048
+PARAMETER num_ctx 8192
+
+# System prompt baked into the model
+SYSTEM """You are a helpful AI assistant.
+
+INTERNAL THINKING RULES (for your hidden reasoning only):
+- Keep thinking SHORT (under 100 words)
+- No "But wait", "Actually", "Let me reconsider" - decide and move on
+- Your thinking is PRIVATE - never show it in your response
+
+YOUR RESPONSE (what user sees):
+- Just answer naturally and directly
+- NO numbered steps like "(1) Understand (2) Decide (3) Act" in your response
+- Be conversational and helpful
+- Keep it concise
+
+TOOLS: Use web_search, system_search, list_directory, read_file when needed. Use each tool only once.
+"""
+
+# NOTE: No custom TEMPLATE - we inherit the native Qwen3 template from the base model
+# This ensures proper handling of the thinking field
+
+# License
+LICENSE """Apache 2.0 - Based on Qwen3-4B-Thinking-2507 by Alibaba"""
