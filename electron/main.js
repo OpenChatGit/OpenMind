@@ -798,6 +798,142 @@ ipcMain.handle('open-external', async (event, url) => {
     return { success: true };
 });
 
+// Model Creator - Create custom Ollama models
+ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPrompt, params }) => {
+    console.log('Creating Ollama model:', { name, baseModel });
+    
+    const sendProgress = (type, message) => {
+        try {
+            if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+                mainWindow.webContents.send('model-create-progress', { type, message });
+            }
+        } catch (err) {
+            console.error('Error sending progress:', err.message);
+        }
+    };
+    
+    try {
+        sendProgress('info', `Erstelle Modelfile für "${name}"...`);
+        
+        // Build Modelfile content
+        let modelfile = `# Custom model: ${name}\n`;
+        modelfile += `# Created with OpenChat Model Creator\n\n`;
+        modelfile += `FROM ${baseModel}\n\n`;
+        
+        // Add parameters
+        if (params.temperature !== undefined) {
+            modelfile += `PARAMETER temperature ${params.temperature}\n`;
+        }
+        if (params.top_p !== undefined) {
+            modelfile += `PARAMETER top_p ${params.top_p}\n`;
+        }
+        if (params.top_k !== undefined) {
+            modelfile += `PARAMETER top_k ${params.top_k}\n`;
+        }
+        if (params.repeat_penalty !== undefined) {
+            modelfile += `PARAMETER repeat_penalty ${params.repeat_penalty}\n`;
+        }
+        if (params.num_ctx !== undefined) {
+            modelfile += `PARAMETER num_ctx ${params.num_ctx}\n`;
+        }
+        
+        modelfile += '\n';
+        
+        // Add system prompt
+        if (systemPrompt && systemPrompt.trim()) {
+            // Escape quotes in system prompt
+            const escapedPrompt = systemPrompt.replace(/"/g, '\\"');
+            modelfile += `SYSTEM """${systemPrompt}"""\n`;
+        }
+        
+        console.log('Generated Modelfile:\n', modelfile);
+        sendProgress('info', 'Modelfile generiert, starte ollama create...');
+        
+        // Write temporary Modelfile
+        const fs = require('fs');
+        const os = require('os');
+        const tempDir = os.tmpdir();
+        const modelfilePath = path.join(tempDir, `Modelfile_${name}_${Date.now()}`);
+        
+        fs.writeFileSync(modelfilePath, modelfile, 'utf8');
+        sendProgress('info', `Temporäre Modelfile erstellt: ${modelfilePath}`);
+        
+        // Run ollama create
+        const { spawn } = require('child_process');
+        
+        return new Promise((resolve) => {
+            const ollamaProcess = spawn('ollama', ['create', name, '-f', modelfilePath], {
+                encoding: 'utf8'
+            });
+            
+            let stdout = '';
+            let stderr = '';
+            
+            ollamaProcess.stdout.on('data', (data) => {
+                const text = data.toString();
+                stdout += text;
+                console.log('ollama create stdout:', text);
+                
+                // Parse progress from ollama output
+                const lines = text.split('\n').filter(l => l.trim());
+                for (const line of lines) {
+                    if (line.includes('transferring')) {
+                        sendProgress('info', 'Übertrage Model-Daten...');
+                    } else if (line.includes('creating')) {
+                        sendProgress('info', 'Erstelle Model-Layer...');
+                    } else if (line.includes('writing')) {
+                        sendProgress('info', 'Schreibe Model...');
+                    } else if (line.includes('success')) {
+                        sendProgress('success', 'Model erfolgreich erstellt!');
+                    } else if (line.trim()) {
+                        sendProgress('info', line.trim());
+                    }
+                }
+            });
+            
+            ollamaProcess.stderr.on('data', (data) => {
+                const text = data.toString();
+                stderr += text;
+                console.error('ollama create stderr:', text);
+                sendProgress('error', text);
+            });
+            
+            ollamaProcess.on('close', (code) => {
+                // Cleanup temp file
+                try {
+                    fs.unlinkSync(modelfilePath);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+                
+                if (code === 0) {
+                    console.log('Model created successfully');
+                    resolve({ success: true, name });
+                } else {
+                    console.error('Model creation failed with code:', code);
+                    resolve({ 
+                        success: false, 
+                        error: stderr || `ollama create failed with code ${code}` 
+                    });
+                }
+            });
+            
+            ollamaProcess.on('error', (err) => {
+                console.error('Failed to start ollama:', err);
+                resolve({ 
+                    success: false, 
+                    error: `Failed to start ollama: ${err.message}` 
+                });
+            });
+        });
+        
+    } catch (error) {
+        console.error('Model creation error:', error);
+        sendProgress('error', error.message);
+        return { success: false, error: error.message };
+    }
+});
+
 app.whenReady().then(async () => {
     console.log('=== Electron App Starting ===');
     console.log('Initializing database...');

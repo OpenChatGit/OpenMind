@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings } from 'lucide-react';
+import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Sparkles } from 'lucide-react';
 
 const Sidebar = ({
   chats,
@@ -11,7 +11,8 @@ const Sidebar = ({
   onToggleSidebar,
   hfUser,
   onOpenLoginModal,
-  onHfLogout
+  onHfLogout,
+  onOpenModelCreator
 }) => {
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -467,6 +468,31 @@ const Sidebar = ({
             )}
             <button
               onClick={() => {
+                onOpenModelCreator?.();
+                setShowUserMenu(false);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                width: '100%',
+                padding: '8px 12px',
+                background: 'transparent',
+                border: 'none',
+                color: '#ececec',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Sparkles size={14} />
+              Model Creator
+            </button>
+            <button
+              onClick={() => {
                 console.log('Settings clicked');
                 setShowUserMenu(false);
               }}
@@ -493,6 +519,7 @@ const Sidebar = ({
           </div>
         )}
       </div>
+
     </div>
   );
 };

@@ -45,5 +45,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onMcpToolUse: (callback) => ipcRenderer.on('mcp-tool-use', (event, data) => callback(data)),
     
     // External Links
-    openExternal: (url) => ipcRenderer.invoke('open-external', url)
+    openExternal: (url) => ipcRenderer.invoke('open-external', url),
+    
+    // Model Creator API
+    createOllamaModel: (config) => ipcRenderer.invoke('create-ollama-model', config),
+    onModelCreateProgress: (callback) => ipcRenderer.on('model-create-progress', (event, data) => callback(data))
 });

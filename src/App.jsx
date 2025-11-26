@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import TitleBar from './components/TitleBar';
 import LoginModal from './components/LoginModal';
+import ModelCreator from './components/ModelCreator';
 import { PanelLeft } from 'lucide-react';
 
 // Get initial active chat ID from localStorage
@@ -22,6 +23,9 @@ const App = () => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [tokenInput, setTokenInput] = useState('');
+  
+  // Model Creator State
+  const [showModelCreator, setShowModelCreator] = useState(false);
 
   // Load chats from database on startup
   useEffect(() => {
@@ -208,6 +212,7 @@ const App = () => {
               hfUser={hfUser}
               onOpenLoginModal={handleOpenLoginModal}
               onHfLogout={handleHfLogout}
+              onOpenModelCreator={() => setShowModelCreator(true)}
             />
           </div>
         </div>
@@ -263,6 +268,11 @@ const App = () => {
         tokenInput={tokenInput}
         setTokenInput={setTokenInput}
         setLoginError={setLoginError}
+      />
+
+      <ModelCreator
+        isOpen={showModelCreator}
+        onClose={() => setShowModelCreator(false)}
       />
     </div>
   );
