@@ -5,7 +5,9 @@ A modern AI chat application built with Electron, React, and local LLM support.
 ## Features
 
 - 💬 Chat with local AI models
-- 🔌 MCP (Model Context Protocol) support
+- 👁️ Vision model support (llava, bakllava, moondream, etc.)
+- 📎 Image attachments via file picker or clipboard paste (Ctrl+V)
+- 🔌 MCP (Model Context Protocol) support **(Somewhat)**
 - 🤗 Hugging Face integration
 - 🔍 Deep search capabilities
 - 📊 Beautiful UI with React + Vite
