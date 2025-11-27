@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onMessageUpdate: (callback) => ipcRenderer.on('ollama-message-update', (event, message) => callback(message)),
     onDeepSearchToolUse: (callback) => ipcRenderer.on('deepsearch-tool-use', (event, data) => callback(data)),
     
+    // Image/File Selection API
+    selectImages: () => ipcRenderer.invoke('select-images'),
+    
     // Chat Persistence API
     loadChats: () => ipcRenderer.invoke('load-chats'),
     saveChats: (chats) => ipcRenderer.invoke('save-chats', chats),

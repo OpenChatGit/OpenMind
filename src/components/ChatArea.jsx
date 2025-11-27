@@ -21,6 +21,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
   const [mcpTools, setMcpTools] = useState([]);
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [currentToolCalls, setCurrentToolCalls] = useState([]); // Live tool calls during DeepSearch
+  const [attachedImages, setAttachedImages] = useState([]); // Images attached to current message
 
   const fetchModels = useCallback(async () => {
     if (window.electronAPI?.getOllamaModels) {
@@ -125,12 +126,59 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
     }
   };
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || !selectedModel || selectedModel === 'No Models Found') return;
+  const handleAttachImages = async () => {
+    if (window.electronAPI?.selectImages) {
+      const result = await window.electronAPI.selectImages();
+      if (result.success && result.images.length > 0) {
+        setAttachedImages(prev => [...prev, ...result.images]);
+      }
+    }
+  };
 
-    const userMessage = { role: 'user', content: input, id: Date.now() };
-    const inputText = input;
+  const handleRemoveImage = (index) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Handle paste from clipboard (screenshots, copied images)
+  const handlePaste = useCallback((e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const base64 = event.target.result.split(',')[1];
+            const mimeType = file.type;
+            const dataUrl = event.target.result;
+            setAttachedImages(prev => [...prev, {
+              name: `Pasted Image ${Date.now()}`,
+              base64,
+              mimeType,
+              dataUrl
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  }, []);
+
+  const handleSend = useCallback(async () => {
+    if ((!input.trim() && attachedImages.length === 0) || !selectedModel || selectedModel === 'No Models Found') return;
+
+    const userMessage = { 
+      role: 'user', 
+      content: input || (attachedImages.length > 0 ? 'What do you see in this image?' : ''), 
+      id: Date.now(),
+      images: attachedImages.length > 0 ? attachedImages : undefined
+    };
+    const inputText = input || 'Image';
     setInput('');
+    setAttachedImages([]);
 
     let chatId = activeChatId;
     let currentMessages = [...messages];
@@ -232,7 +280,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
         isStreaming: false
       }]);
     }
-  }, [input, selectedModel, activeChatId, messages, onUpdateMessages, onFirstMessage, mcpTools, deepSearchEnabled]);
+  }, [input, selectedModel, activeChatId, messages, onUpdateMessages, onFirstMessage, mcpTools, deepSearchEnabled, attachedImages]);
 
   const isNewChat = !activeChatId || messages.length === 0;
 
@@ -255,6 +303,59 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
         gap: '12px',
         border: '1px solid rgba(255,255,255,0.08)'
       }}>
+        {/* Attached Images Preview */}
+        {attachedImages.length > 0 && (
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            marginBottom: '8px'
+          }}>
+            {attachedImages.map((img, index) => (
+              <div key={index} style={{
+                position: 'relative',
+                width: '60px',
+                height: '60px',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                border: '1px solid rgba(255,255,255,0.2)'
+              }}>
+                <img 
+                  src={img.dataUrl} 
+                  alt={img.name}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover'
+                  }}
+                />
+                <button
+                  onClick={() => handleRemoveImage(index)}
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    right: '2px',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.7)',
+                    border: 'none',
+                    color: 'white',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px',
+                    lineHeight: 1
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -264,7 +365,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
               handleSend();
             }
           }}
-          placeholder="Message AI"
+          onPaste={handlePaste}
+          placeholder={attachedImages.length > 0 ? "Ask about the image(s)..." : "Message AI"}
           style={{
             width: '100%',
             background: 'transparent',
@@ -284,15 +386,16 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
             {/* Attach Button - expands on hover */}
             <button 
               className="expandable-btn"
+              onClick={handleAttachImages}
               style={{
-                background: 'transparent',
+                background: attachedImages.length > 0 ? '#fff' : 'transparent',
                 border: '1px solid rgba(255,255,255,0.3)',
-                color: '#888',
+                color: attachedImages.length > 0 ? '#000' : '#888',
                 cursor: 'pointer',
                 padding: '6px 10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0px',
+                gap: attachedImages.length > 0 ? '6px' : '0px',
                 borderRadius: '20px',
                 fontSize: '0.85rem',
                 fontWeight: '500',
@@ -301,22 +404,33 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
                 whiteSpace: 'nowrap'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                e.currentTarget.style.color = '#ccc';
+                if (attachedImages.length === 0) {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.color = '#ccc';
+                }
                 e.currentTarget.style.gap = '6px';
                 e.currentTarget.querySelector('.btn-label').style.width = 'auto';
                 e.currentTarget.querySelector('.btn-label').style.opacity = '1';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#888';
-                e.currentTarget.style.gap = '0px';
-                e.currentTarget.querySelector('.btn-label').style.width = '0';
-                e.currentTarget.querySelector('.btn-label').style.opacity = '0';
+                if (attachedImages.length === 0) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = '#888';
+                  e.currentTarget.style.gap = '0px';
+                  e.currentTarget.querySelector('.btn-label').style.width = '0';
+                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
+                }
               }}
             >
               <Paperclip size={16} />
-              <span className="btn-label" style={{ width: '0', opacity: '0', overflow: 'hidden', transition: 'all 0.3s ease' }}>Attach</span>
+              <span className="btn-label" style={{ 
+                width: attachedImages.length > 0 ? 'auto' : '0', 
+                opacity: attachedImages.length > 0 ? '1' : '0', 
+                overflow: 'hidden', 
+                transition: 'all 0.3s ease' 
+              }}>
+                {attachedImages.length > 0 ? `${attachedImages.length} Image${attachedImages.length > 1 ? 's' : ''}` : 'Attach'}
+              </span>
             </button>
 
             {/* DeepSearch Button - expands on hover, rotating glow when active */}
@@ -693,8 +807,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
             <button
               onClick={handleSend}
               style={{
-                background: input.trim() ? 'white' : '#4a4a4a',
-                color: input.trim() ? 'black' : '#888',
+                background: (input.trim() || attachedImages.length > 0) ? 'white' : '#4a4a4a',
+                color: (input.trim() || attachedImages.length > 0) ? 'black' : '#888',
                 border: 'none',
                 borderRadius: '50%',
                 width: '32px',
@@ -702,7 +816,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: input.trim() ? 'pointer' : 'default',
+                cursor: (input.trim() || attachedImages.length > 0) ? 'pointer' : 'default',
                 transition: 'all 0.2s'
               }}
             >
@@ -776,6 +890,30 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage }) 
                       lineHeight: '1.5',
                       color: 'white'
                     }}>
+                      {/* Show attached images */}
+                      {msg.images && msg.images.length > 0 && (
+                        <div style={{
+                          display: 'flex',
+                          gap: '8px',
+                          flexWrap: 'wrap',
+                          marginBottom: msg.content ? '10px' : '0'
+                        }}>
+                          {msg.images.map((img, imgIndex) => (
+                            <img 
+                              key={imgIndex}
+                              src={img.dataUrl || `data:${img.mimeType};base64,${img.base64}`}
+                              alt={img.name || 'Attached image'}
+                              style={{
+                                maxWidth: '200px',
+                                maxHeight: '150px',
+                                borderRadius: '8px',
+                                objectFit: 'contain',
+                                border: '1px solid rgba(255,255,255,0.1)'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
                       {msg.content}
                     </div>
                   ) : (

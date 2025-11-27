@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 const { initDatabase, loadChats, saveChats, saveChat, deleteChat } = require('./database');
 const { scanModelsFolder, getModelInfo } = require('./modelScanner');
 const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, getUserInfo } = require('./huggingface');
@@ -101,14 +102,30 @@ ipcMain.handle('get-ollama-models', async () => {
     });
 });
 
-// Send message to Ollama with streaming and reasoning support
+// Send message to Ollama with streaming and reasoning support (including vision)
 ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
     console.log('Sending to Ollama:', { model, messageCount: messages.length });
+
+    // Transform messages to Ollama format (handle images for vision models)
+    const ollamaMessages = messages.map(msg => {
+        if (msg.images && msg.images.length > 0) {
+            // Vision message with images - Ollama expects base64 strings in 'images' array
+            return {
+                role: msg.role,
+                content: msg.content,
+                images: msg.images.map(img => img.base64 || img)
+            };
+        }
+        return {
+            role: msg.role,
+            content: msg.content
+        };
+    });
 
     return new Promise((resolve, reject) => {
         const postData = JSON.stringify({
             model: model,
-            messages: messages,
+            messages: ollamaMessages,
             stream: true
         });
 
@@ -796,6 +813,42 @@ ipcMain.handle('mcp-open-tools-folder', async () => {
 ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
     return { success: true };
+});
+
+// Image Selection for Vision Models
+ipcMain.handle('select-images', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+            { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
+        ]
+    });
+    
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, images: [] };
+    }
+    
+    // Read images and convert to base64
+    const images = [];
+    for (const filePath of result.filePaths) {
+        try {
+            const buffer = fs.readFileSync(filePath);
+            const base64 = buffer.toString('base64');
+            const ext = path.extname(filePath).toLowerCase().slice(1);
+            const mimeType = ext === 'jpg' ? 'jpeg' : ext;
+            images.push({
+                path: filePath,
+                name: path.basename(filePath),
+                base64: base64,
+                mimeType: `image/${mimeType}`,
+                dataUrl: `data:image/${mimeType};base64,${base64}`
+            });
+        } catch (error) {
+            console.error('Error reading image:', filePath, error);
+        }
+    }
+    
+    return { success: true, images };
 });
 
 // Model Creator - Create custom Ollama models
