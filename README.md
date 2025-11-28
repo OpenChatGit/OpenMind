@@ -7,7 +7,7 @@ A modern AI chat application built with Electron, React, and local LLM support v
 - 💬 **Chat with AI models** - Local (Ollama) or Cloud (HuggingFace)
 - 🧠 **Reasoning support** - View model thinking process (DeepSeek-R1, Qwen-QwQ, etc.)
 - 👁️ **Vision models** - Analyze images with llava, bakllava, moondream
-- 🎨 **Image generation** - Local Image-Generation with Diffusers **(Not yet perfekt though)**
+- 🎨 **Image generation** - Local Image-Generation with Diffusers **(Not yet perfect though)**
 - 📎 **Image attachments** - File picker or clipboard paste (Ctrl+V)
 - 🔍 **DeepSearch** - Web search with tool use **(Custom could be not perfect)**
 - 🔌 **MCP Tools** - Model Context Protocol support **(Not Really Working now well kinda i gues)**
