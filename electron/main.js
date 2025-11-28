@@ -3,10 +3,11 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const { initDatabase, loadChats, saveChats, saveChat, deleteChat } = require('./database');
-const { scanModelsFolder, getModelInfo } = require('./modelScanner');
-const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, getUserInfo } = require('./huggingface');
+const { scanModelsFolder, scanDiffusionModels, getModelInfo } = require('./modelScanner');
+const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, getUserInfo, sendInferenceMessage, getInferenceModels, searchInferenceModels } = require('./huggingface');
 const { initBrowser, closeBrowser, getDeepSearchTools, executeToolCall } = require('./deepSearch');
 const { initMcpHandler, getTools, getEnabledTools, getOllamaToolDefinitions, toggleTool, refreshTools, executeTool, openToolsFolder } = require('./mcpHandler');
+const imageGen = require('./imageGen');
 
 // Helper function to extract <think> tags from content (for models like Qwen3 that output thinking in content)
 function extractThinkTags(content) {
@@ -203,9 +204,22 @@ ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
                             console.log('Stream complete');
                             // Final extraction to ensure we got everything
                             const finalExtracted = extractThinkTags(rawContent);
+                            
+                            // Extract inference stats from Ollama response
+                            const stats = {
+                                total_duration: parsed.total_duration, // nanoseconds
+                                load_duration: parsed.load_duration,
+                                prompt_eval_count: parsed.prompt_eval_count,
+                                prompt_eval_duration: parsed.prompt_eval_duration,
+                                eval_count: parsed.eval_count,
+                                eval_duration: parsed.eval_duration,
+                                model: parsed.model
+                            };
+                            
                             resolve({
                                 thinking: thinkingContent || finalExtracted.thinking,
-                                content: finalExtracted.content || 'No response'
+                                content: finalExtracted.content || 'No response',
+                                stats: stats
                             });
                         }
                     } catch (e) {
@@ -219,7 +233,8 @@ ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
                     const finalExtracted = extractThinkTags(rawContent);
                     resolve({
                         thinking: thinkingContent || finalExtracted.thinking,
-                        content: finalExtracted.content || 'No response'
+                        content: finalExtracted.content || 'No response',
+                        stats: {} // No stats available in this case
                     });
                 }
             });
@@ -748,6 +763,10 @@ ipcMain.handle('scan-models-folder', async () => {
     return scanModelsFolder();
 });
 
+ipcMain.handle('scan-diffusion-models', async () => {
+    return scanDiffusionModels();
+});
+
 ipcMain.handle('get-model-info', async (event, modelPath) => {
     return getModelInfo(modelPath);
 });
@@ -823,11 +842,11 @@ ipcMain.handle('select-images', async () => {
             { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
         ]
     });
-    
+
     if (result.canceled || result.filePaths.length === 0) {
         return { success: false, images: [] };
     }
-    
+
     // Read images and convert to base64
     const images = [];
     for (const filePath of result.filePaths) {
@@ -847,8 +866,85 @@ ipcMain.handle('select-images', async () => {
             console.error('Error reading image:', filePath, error);
         }
     }
-    
+
     return { success: true, images };
+});
+
+// Local Image Generation via Diffusers
+ipcMain.handle('generate-image', async (event, { prompt, negativePrompt, width, height, steps, guidance, model, localPath }) => {
+    const displayName = localPath ? path.basename(localPath) : (model || 'sdxl-turbo');
+    console.log('Generating image locally:', { prompt, model: displayName, localPath: !!localPath, width, height });
+
+    try {
+        // Send progress updates to renderer
+        const onProgress = (message, progress) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('image-gen-progress', { message, progress });
+            }
+        };
+
+        // Load model if specified and different from current
+        const status = imageGen.getStatus();
+        const targetModel = localPath || model || 'stabilityai/sdxl-turbo';
+        
+        if (!status.running || status.currentModel !== targetModel) {
+            onProgress(`Loading model: ${displayName}...`, 0);
+            await imageGen.loadModel(model || 'local-model', localPath, onProgress);
+        }
+
+        // Generate image
+        const result = await imageGen.generateImage({
+            prompt,
+            negativePrompt: negativePrompt || '',
+            width: width || 512,
+            height: height || 512,
+            steps: steps || 4, // SDXL-Turbo needs only 4 steps
+            guidance: guidance || 0.0 // SDXL-Turbo works best with 0 guidance
+        }, onProgress);
+
+        return {
+            success: result.success,
+            image: result.image
+        };
+    } catch (error) {
+        console.error('Image generation error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Load image generation model (supports local path)
+ipcMain.handle('load-image-model', async (event, { modelId, localPath }) => {
+    try {
+        const onProgress = (message) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('image-gen-progress', { message });
+            }
+        };
+        await imageGen.loadModel(modelId, localPath, onProgress);
+        return { success: true, model: modelId, localPath };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Unload image model to free memory
+ipcMain.handle('unload-image-model', async () => {
+    try {
+        await imageGen.unloadModel();
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Check image generation status
+ipcMain.handle('check-image-gen-status', async () => {
+    return imageGen.getStatus();
+});
+
+// Check Python setup for image generation
+ipcMain.handle('check-python-setup', async () => {
+    return imageGen.checkPythonSetup();
 });
 
 // Model Creator - Create custom Ollama models
@@ -995,9 +1091,32 @@ app.whenReady().then(async () => {
     initMcpHandler();
     console.log('Initializing DeepSearch browser...');
     await initBrowser(); // Pre-start browser for faster searches
+    
+    // Check Python setup for image generation
+    console.log('Checking Python setup for image generation...');
+    const pythonStatus = await imageGen.checkPythonSetup();
+    if (pythonStatus.available) {
+        console.log('✓ Python and dependencies available for image generation');
+        if (pythonStatus.pythonCmd) {
+            console.log('  Using:', pythonStatus.pythonCmd);
+        }
+    } else if (pythonStatus.missing && pythonStatus.missing.length > 0) {
+        console.log('⚠ Missing Python packages:', pythonStatus.missing.join(', '));
+        console.log('  Install with:', pythonStatus.installCmd);
+        if (pythonStatus.pythonCmd) {
+            console.log('  Python found:', pythonStatus.pythonCmd);
+        }
+    } else if (pythonStatus.error) {
+        console.log('⚠ Python issue:', pythonStatus.error);
+        console.log('  Fix:', pythonStatus.installCmd);
+    } else {
+        console.log('⚠ Python not found. Install Python 3.8+ from python.org');
+    }
+    
     console.log('IPC Handlers registered:');
     console.log('- Chat handlers: load-chats, save-chats, save-chat, delete-chat');
-    console.log('- Model scanner handlers: scan-models-folder, get-model-info');
+    console.log('- Model scanner handlers: scan-models-folder, scan-diffusion-models, get-model-info');
+    console.log('- Image generation handlers: generate-image, load-image-model, check-python-setup');
     console.log('- Hugging Face handlers: hf-set-token, hf-load-token, hf-clear-token, hf-search-models, hf-download-model, hf-get-user-info');
     console.log('- MCP handlers: mcp-get-tools, mcp-toggle-tool, mcp-refresh-tools, mcp-execute-tool, mcp-open-tools-folder');
     console.log('Creating window...');
@@ -1076,9 +1195,85 @@ function checkOllamaStatus(win) {
     hosts.forEach(checkHost);
 }
 
+// HuggingFace Inference API handlers
+ipcMain.handle('hf-get-inference-models', async () => {
+    return { success: true, models: getInferenceModels() };
+});
+
+ipcMain.handle('hf-search-inference-models', async (event, query) => {
+    return await searchInferenceModels(query, 5);
+});
+
+ipcMain.handle('send-hf-message', async (event, { model, messages }) => {
+    console.log('Sending to HuggingFace Inference:', { model, messageCount: messages.length });
+    
+    try {
+        // Load API key from settings if not already set
+        const settingsFile = path.join(app.getPath('userData'), 'settings.json');
+        if (fs.existsSync(settingsFile)) {
+            const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+            if (settings.hfApiKey) {
+                setApiToken(settings.hfApiKey);
+            }
+        }
+        
+        const response = await sendInferenceMessage(model, messages, 
+            // onChunk - stream content updates
+            (content) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('ollama-message-update', content);
+                }
+            },
+            // onThinking - stream reasoning/thinking updates
+            (thinking) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('ollama-thinking-update', thinking);
+                }
+            }
+        );
+        
+        return response;
+    } catch (error) {
+        console.error('HF Inference error:', error);
+        throw error;
+    }
+});
+
+// Settings file path
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+// Load settings
+ipcMain.handle('load-settings', async () => {
+    try {
+        if (fs.existsSync(settingsPath)) {
+            const data = fs.readFileSync(settingsPath, 'utf8');
+            return { success: true, settings: JSON.parse(data) };
+        }
+        return { success: true, settings: {} };
+    } catch (error) {
+        console.error('Error loading settings:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Save settings
+ipcMain.handle('save-settings', async (event, settings) => {
+    try {
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        console.log('Settings saved:', settings);
+        return { success: true };
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        return { success: false, error: error.message };
+    }
+});
+
 app.on('window-all-closed', async () => {
     // Close DeepSearch browser
     await closeBrowser();
+    
+    // Stop image generation process
+    imageGen.stopProcess();
     
     if (process.platform !== 'darwin') {
         app.quit();

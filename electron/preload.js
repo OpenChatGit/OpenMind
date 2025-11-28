@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Image/File Selection API
     selectImages: () => ipcRenderer.invoke('select-images'),
     
+    // Image Generation API (Local Diffusers)
+    generateImage: (params) => ipcRenderer.invoke('generate-image', params),
+    loadImageModel: (modelId) => ipcRenderer.invoke('load-image-model', modelId),
+    unloadImageModel: () => ipcRenderer.invoke('unload-image-model'),
+    checkImageGenStatus: () => ipcRenderer.invoke('check-image-gen-status'),
+    checkPythonSetup: () => ipcRenderer.invoke('check-python-setup'),
+    onImageGenProgress: (callback) => ipcRenderer.on('image-gen-progress', (event, data) => callback(data)),
+    
     // Chat Persistence API
     loadChats: () => ipcRenderer.invoke('load-chats'),
     saveChats: (chats) => ipcRenderer.invoke('save-chats', chats),
@@ -27,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // Model Scanner API
     scanModelsFolder: () => ipcRenderer.invoke('scan-models-folder'),
+    scanDiffusionModels: () => ipcRenderer.invoke('scan-diffusion-models'),
     getModelInfo: (modelPath) => ipcRenderer.invoke('get-model-info', modelPath),
     
     // Hugging Face API
@@ -52,5 +61,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // Model Creator API
     createOllamaModel: (config) => ipcRenderer.invoke('create-ollama-model', config),
-    onModelCreateProgress: (callback) => ipcRenderer.on('model-create-progress', (event, data) => callback(data))
+    onModelCreateProgress: (callback) => ipcRenderer.on('model-create-progress', (event, data) => callback(data)),
+    
+    // Settings API
+    loadSettings: () => ipcRenderer.invoke('load-settings'),
+    saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+    
+    // HuggingFace Inference API
+    getHfInferenceModels: () => ipcRenderer.invoke('hf-get-inference-models'),
+    searchHfInferenceModels: (query) => ipcRenderer.invoke('hf-search-inference-models', query),
+    sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages })
 });

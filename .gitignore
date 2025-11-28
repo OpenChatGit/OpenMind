@@ -12,11 +12,19 @@ dist
 dist-ssr
 *.local
 
-# Database files
+# Database and data files
 data/
 *.db
 *.db-shm
 *.db-wal
+
+# API Keys and secrets - NEVER commit these!
+**/hf_config.json
+**/settings.json
+*.env
+.env.*
+secrets.json
+config.local.json
 
 # Editor directories and files
 .vscode/*
@@ -30,10 +38,20 @@ data/
 *.sw?
 
 # Large model files
-models/Qwen3-4B-Thinking-2507/
+models/
 *.gguf
 *.bin
 *.safetensors
 *.onnx
 *.pt
 *.pth
+
+# Python
+python/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Electron build output
+out/
+release/

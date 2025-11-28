@@ -12,7 +12,8 @@ const Sidebar = ({
   hfUser,
   onOpenLoginModal,
   onHfLogout,
-  onOpenModelCreator
+  onOpenModelCreator,
+  onOpenSettings
 }) => {
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -493,7 +494,7 @@ const Sidebar = ({
             </button>
             <button
               onClick={() => {
-                console.log('Settings clicked');
+                onOpenSettings?.();
                 setShowUserMenu(false);
               }}
               style={{

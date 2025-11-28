@@ -4,6 +4,7 @@ import ChatArea from './components/ChatArea';
 import TitleBar from './components/TitleBar';
 import LoginModal from './components/LoginModal';
 import ModelCreator from './components/ModelCreator';
+import SettingsModal from './components/SettingsModal';
 import { PanelLeft } from 'lucide-react';
 
 // Get initial active chat ID from localStorage
@@ -26,6 +27,35 @@ const App = () => {
   
   // Model Creator State
   const [showModelCreator, setShowModelCreator] = useState(false);
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [appSettings, setAppSettings] = useState({
+    inferenceProvider: 'local',
+    hfApiKey: '',
+    remoteOllamaHost: '',
+    remoteOllamaPort: '11434'
+  });
+
+  // Load settings on startup
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (window.electronAPI?.loadSettings) {
+        const result = await window.electronAPI.loadSettings();
+        if (result?.success && result.settings) {
+          setAppSettings(prev => ({ ...prev, ...result.settings }));
+        }
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const handleSaveSettings = async (newSettings) => {
+    setAppSettings(newSettings);
+    if (window.electronAPI?.saveSettings) {
+      await window.electronAPI.saveSettings(newSettings);
+    }
+  };
 
   // Load chats from database on startup
   useEffect(() => {
@@ -213,6 +243,7 @@ const App = () => {
               onOpenLoginModal={handleOpenLoginModal}
               onHfLogout={handleHfLogout}
               onOpenModelCreator={() => setShowModelCreator(true)}
+              onOpenSettings={() => setShowSettings(true)}
             />
           </div>
         </div>
@@ -256,6 +287,7 @@ const App = () => {
           messages={activeChat?.messages || []}
           onUpdateMessages={handleUpdateMessages}
           onFirstMessage={handleFirstMessage}
+          inferenceSettings={appSettings}
         />
       </div>
 
@@ -273,6 +305,13 @@ const App = () => {
       <ModelCreator
         isOpen={showModelCreator}
         onClose={() => setShowModelCreator(false)}
+      />
+
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        settings={appSettings}
+        onSaveSettings={handleSaveSettings}
       />
     </div>
   );
