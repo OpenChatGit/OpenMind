@@ -916,6 +916,7 @@ function getDeepSearchTools() {
   return [...baseTools, ...mcpTools];
 }
 
+// Get Research Mode tools (subset for research)
 // Execute a tool call
 async function executeToolCall(toolName, args) {
   console.log('executeToolCall:', toolName, JSON.stringify(args));

@@ -84,9 +84,12 @@ def check_sd_cpp_cuda():
         info = sd_get_system_info()
         if isinstance(info, bytes):
             info = info.decode('utf-8')
-        # Check if CUDA/CUBLAS is mentioned in system info
-        has_cuda = 'CUDA' in info.upper() or 'CUBLAS' in info.upper()
+        info_upper = info.upper()
+        # Check for CUDA indicators in system info
+        has_cuda = any(x in info_upper for x in ['CUDA', 'CUBLAS', 'SD_USE_CUDA', 'NVIDIA', 'GPU'])
         return has_cuda, info.strip()
+    except ImportError:
+        return False, "stable-diffusion-cpp not installed"
     except Exception as e:
         return False, str(e)
 
@@ -444,13 +447,16 @@ def main():
                 
             elif action == "status":
                 cuda_available, gpu_info = check_cuda_available()
+                sd_cpp_cuda, sd_cpp_info = check_sd_cpp_cuda()
                 send_response({
                     "type": "status",
                     "model_loaded": current_model is not None,
                     "current_model": current_model,
                     "model_type": model_type,
                     "cuda_available": cuda_available,
-                    "gpu_info": gpu_info
+                    "gpu_info": gpu_info,
+                    "sd_cpp_cuda": sd_cpp_cuda,
+                    "sd_cpp_info": sd_cpp_info
                 })
                 
             elif action == "quit":

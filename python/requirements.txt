@@ -4,10 +4,33 @@ transformers
 accelerate
 safetensors
 
-# Optional: For GGUF model support (quantized Stable Diffusion)
-# stable-diffusion-cpp-python
+# For GGUF model support (quantized Stable Diffusion)
+stable-diffusion-cpp-python
 
-# For CUDA/GPU support:
-# 1. Install PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121
-# 2. For GGUF GPU support, install stable-diffusion-cpp-python with CUDA:
-#    CMAKE_ARGS="-DSD_CUBLAS=ON" pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+# ============================================================
+# CUDA/GPU SUPPORT INSTRUCTIONS
+# ============================================================
+#
+# Option 1: Use the setup script (recommended)
+#   node scripts/setup-python.js --cuda
+#
+# Option 2: Manual installation
+#
+#   Windows (CMD):
+#     set CMAKE_ARGS=-DSD_CUDA=ON
+#     pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+#
+#   Windows (PowerShell):
+#     $env:CMAKE_ARGS="-DSD_CUDA=ON"
+#     pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+#
+#   Linux/Mac:
+#     CMAKE_ARGS="-DSD_CUDA=ON" pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+#
+# Prerequisites for CUDA build:
+#   - NVIDIA CUDA Toolkit (nvcc must be in PATH)
+#   - CMake
+#   - Visual Studio Build Tools (Windows) or GCC (Linux)
+#
+# For PyTorch with CUDA (if not auto-detected):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121

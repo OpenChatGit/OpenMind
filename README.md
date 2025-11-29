@@ -7,11 +7,12 @@ A modern AI chat application built with Electron, React, and local LLM support v
 - 💬 **Chat with AI models** - Local (Ollama) or Cloud (HuggingFace)
 - 🧠 **Reasoning support** - View model thinking process (DeepSeek-R1, Qwen-QwQ, etc.)
 - 👁️ **Vision models** - Analyze images with llava, bakllava, moondream
-- 🎨 **Image generation** - Local Image-Generation with Diffusers **(Not yet perfect though)**
+- 🎨 **Image generation** - Local GGUF models with GPU acceleration (CUDA)
+- 🖼️ **Fullscreen images** - Click generated images to view in fullscreen
 - 📎 **Image attachments** - File picker or clipboard paste (Ctrl+V)
-- 🔍 **DeepSearch** - Web search with tool use **(Custom could be not perfect)**
-- 🔌 **MCP Tools** - Model Context Protocol support **(Not Really Working now well kinda i gues)**
-- 🤗 **HuggingFace** - Cloud inference with HF Pro subscription **(Optional)**
+- 🔍 **DeepSearch** - Web search with tool use
+- 🔌 **MCP Tools** - Model Context Protocol support
+- 🤗 **HuggingFace** - Cloud inference with HF Pro subscription (Optional)
 - 📊 **Inference Stats** - Token counts, speed, duration (like Ollama verbose)
 - 🔄 **Regenerate** - Re-run any AI response
 - 📋 **Copy** - One-click copy AI responses
@@ -51,72 +52,105 @@ Supported models include Llama, Mistral, Qwen, Phi, and more.
 
 ## Image Generation Setup
 
-Image generation runs locally using HuggingFace Diffusers with Python.
+Image generation runs locally using GGUF models with `stable-diffusion-cpp-python`.
+
+> ⚠️ **IMPORTANT: CUDA Support**
+> 
+> The default `pip install stable-diffusion-cpp-python` installs a **CPU-only** version which is very slow!
+> For GPU acceleration, you need to build it with CUDA support (see below).
 
 ### 1. Python Dependencies
 
 ```bash
-# Option 1: Automatic setup (recommended)
+# Basic setup (CPU only - slow!)
 npm run setup:python
 
-# Option 2: Manual install
-pip install torch diffusers transformers accelerate safetensors
-
-# Option 3: With CUDA support (NVIDIA GPU - much faster)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-pip install diffusers transformers accelerate safetensors
+# OR with CUDA support (recommended for NVIDIA GPUs)
+npm run setup:python -- --cuda
 ```
 
-### 2. Download a Model
+### 2. CUDA Setup (NVIDIA GPU - Highly Recommended!)
 
-You need to download an image generation model and place it in the `models/` folder.
+For fast image generation, you need CUDA support. This requires building `stable-diffusion-cpp-python` from source.
 
-**Recommended: SDXL-Turbo (fast, good quality)**
+**Prerequisites:**
+- NVIDIA GPU with CUDA support
+- [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) installed (`nvcc` must be in PATH)
+- [CMake](https://cmake.org/download/) installed
+- Visual Studio Build Tools (Windows) or GCC (Linux)
 
-1. Go to [huggingface.co/stabilityai/sdxl-turbo](https://huggingface.co/stabilityai/sdxl-turbo)
-2. Click "Files and versions"
-3. Download the entire folder (or use `git lfs`):
-   ```bash
-   # Using git (requires git-lfs installed)
-   cd models
-   git lfs install
-   git clone https://huggingface.co/stabilityai/sdxl-turbo
-   ```
-4. Or download manually: Download all files and put them in `models/sdxl-turbo/`
+**Option 1: Automatic (Recommended)**
+```bash
+node scripts/setup-python.js --cuda
+```
 
-**Alternative Models:**
-- [stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) - Classic SD 1.5
-- [stable-diffusion-2-1](https://huggingface.co/stabilityai/stable-diffusion-2-1) - SD 2.1
-- [GGUF quantized models](https://huggingface.co/models?search=stable-diffusion+gguf) - Smaller file size
+**Option 2: Manual Installation**
 
-**Supported formats:**
-- **Diffusers** - HuggingFace format (folders with `model_index.json`)
-- **GGUF** - Quantized models (requires `pip install stable-diffusion-cpp-python`)
-- **Safetensors** - Single file models
+Windows (CMD):
+```cmd
+set CMAKE_ARGS=-DSD_CUDA=ON
+pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+```
 
-### 3. Using Image Generation
+Windows (PowerShell):
+```powershell
+$env:CMAKE_ARGS="-DSD_CUDA=ON"
+pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+```
+
+Linux/Mac:
+```bash
+CMAKE_ARGS="-DSD_CUDA=ON" pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+```
+
+> **Note:** Building takes 5-10 minutes. The build compiles CUDA kernels for your GPU.
+
+### 3. Download a GGUF Model
+
+Download a quantized Stable Diffusion model in GGUF format and place it in the `models/` folder.
+
+**Recommended Models:**
+- [stable-diffusion-v1-5-GGUF](https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF) - Classic SD 1.5
+- [stable-diffusion-2-1-GGUF](https://huggingface.co/second-state/stable-diffusion-2-1-GGUF) - SD 2.1
+- Search for more: [GGUF Stable Diffusion models](https://huggingface.co/models?search=stable-diffusion+gguf)
+
+**Download Example:**
+```bash
+cd models
+# Create folder and download model
+mkdir stable-diffusion-v1-5-GGUF
+cd stable-diffusion-v1-5-GGUF
+# Download the Q8_0 quantized version (best quality)
+curl -LO https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF/resolve/main/stable-diffusion-v1-5-Q8_0.gguf
+```
+
+**Supported Quantizations (in order of quality):**
+- `Q8_0` - Best quality, larger file (~2GB)
+- `Q5_1`, `Q5_0` - Good balance
+- `Q4_1`, `Q4_0` - Smaller, slightly lower quality
+
+### 4. Using Image Generation
 
 1. Click the **🖼️ Generate** button in the chat input
 2. Select your downloaded model from the dropdown
 3. Type a description of the image you want
 4. Press Enter
+5. **Click on the generated image to view it in fullscreen!**
 
-### GPU Acceleration (CUDA)
+### Troubleshooting
 
-For NVIDIA GPUs, install PyTorch with CUDA for much faster generation:
+**"CUDA not compiled" or slow generation:**
+- You need to rebuild with CUDA: `node scripts/setup-python.js --cuda`
+- Make sure `nvcc --version` works in your terminal
 
-```bash
-# Windows/Linux
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+**Build fails:**
+- Install CUDA Toolkit from NVIDIA
+- Install Visual Studio Build Tools (Windows) with C++ workload
+- Make sure CMake is installed
 
-# For GGUF models with GPU:
-# Windows (requires Visual Studio Build Tools):
-set CMAKE_ARGS=-DSD_CUBLAS=ON
-pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
-
-# Linux/Mac:
-CMAKE_ARGS="-DSD_CUBLAS=ON" pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
-```
+**Model not loading:**
+- Check that the `.gguf` file is in a folder inside `models/`
+- Try a different quantization (Q8_0 is most compatible)
 
 ## Message Actions
 
@@ -163,6 +197,19 @@ The reasoning is shown in a collapsible "Reasoning" section above the response.
 │   └── image_gen.py   # Diffusers script
 └── mcp-tools/         # MCP tool servers
 ```
+
+## Recent Changes
+
+### Image Generation Improvements
+- ✅ **CUDA/GPU Support** - Fast image generation with NVIDIA GPUs
+- ✅ **Automatic CUDA setup** - `node scripts/setup-python.js --cuda`
+- ✅ **Fullscreen image viewer** - Click generated images to view fullscreen (ESC to close)
+- ✅ **Better CUDA detection** - UI now correctly shows GPU status
+- ✅ **GGUF model support** - Use quantized models for smaller file sizes
+
+### UI Improvements
+- ✅ **Hover effects on images** - Visual feedback when hovering over generated images
+- ✅ **ESC key support** - Close fullscreen with keyboard
 
 ## License
 

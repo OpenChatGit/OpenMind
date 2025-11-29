@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Wrench, FolderOpen, RefreshCw, Image, Copy, Info, RotateCcw, Check } from 'lucide-react';
+import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Wrench, FolderOpen, RefreshCw, Image, Copy, Info, RotateCcw, Check, SlidersHorizontal, Eye, EyeOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -34,6 +34,37 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [copiedMessageId, setCopiedMessageId] = useState(null); // Track which message was copied
   const [showInfoDropdown, setShowInfoDropdown] = useState(null); // Track which message info dropdown is open
   const [infoDropdownPosition, setInfoDropdownPosition] = useState('below'); // 'above' or 'below'
+  const [hiddenButtons, setHiddenButtons] = useState(() => {
+    // Load from localStorage
+    const saved = localStorage.getItem('hiddenButtons');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [isButtonsMenuOpen, setIsButtonsMenuOpen] = useState(false); // Dropup menu for hiding buttons
+  const [fullscreenImage, setFullscreenImage] = useState(null); // Fullscreen image modal
+  
+  // Save hidden buttons to localStorage when changed
+  useEffect(() => {
+    localStorage.setItem('hiddenButtons', JSON.stringify(hiddenButtons));
+  }, [hiddenButtons]);
+
+  // ESC key to close fullscreen image
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && fullscreenImage) {
+        setFullscreenImage(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fullscreenImage]);
+
+  const toggleButtonVisibility = (buttonId) => {
+    setHiddenButtons(prev => 
+      prev.includes(buttonId) 
+        ? prev.filter(id => id !== buttonId)
+        : [...prev, buttonId]
+    );
+  };
   
   // Get current inference provider
   const inferenceProvider = inferenceSettings?.inferenceProvider || 'local';
@@ -460,6 +491,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         sources: deepSearchEnabled ? [...currentSources] : [], // Include search sources
         toolCalls: deepSearchEnabled ? [...currentToolCalls] : [], // Include tool calls
         previews: deepSearchEnabled ? [...currentPreviews] : [], // Include preview images
+
         stats: response.stats || {}, // Include inference stats
         model: selectedModel, // Include model used
         id: assistantMessageId,
@@ -468,6 +500,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       setCurrentSources([]); // Clear after saving
       setCurrentToolCalls([]); // Clear tool calls after saving
       setCurrentPreviews([]); // Clear previews after saving
+      
+
     } catch (error) {
       console.error('Inference error:', error);
       setIsDeepSearching(false);
@@ -744,6 +778,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             {/* Attach Button - expands on hover */}
+            {!hiddenButtons.includes('attach') && (
             <button 
               className="expandable-btn"
               onClick={handleAttachImages}
@@ -792,8 +827,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 {attachedImages.length > 0 ? `${attachedImages.length} Image${attachedImages.length > 1 ? 's' : ''}` : 'Attach'}
               </span>
             </button>
+            )}
 
             {/* DeepSearch Button - expands on hover, rotating glow when active */}
+            {!hiddenButtons.includes('deepsearch') && (
             <div style={{ 
               position: 'relative',
               borderRadius: '20px',
@@ -817,7 +854,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 `}
               </style>
               <button
-                onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
+                onClick={() => {
+                  const newValue = !deepSearchEnabled;
+                  setDeepSearchEnabled(newValue);
+                }}
                 style={{
                   background: deepSearchEnabled ? '#fff' : '#2c2c2e',
                   border: isDeepSearching ? 'none' : '1px solid rgba(255,255,255,0.3)',
@@ -863,7 +903,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               </button>
             </div>
 
+            )}
+
             {/* Image Generation Button */}
+            {!hiddenButtons.includes('imagegen') && (
             <div style={{ 
               position: 'relative',
               borderRadius: '20px',
@@ -919,8 +962,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 }}>Generate</span>
               </button>
             </div>
+            )}
 
             {/* MCP Tools Button - expands on hover, rotating glow when processing */}
+            {!hiddenButtons.includes('mcptools') && (
             <div style={{ 
               position: 'relative',
               borderRadius: '20px',
@@ -1118,6 +1163,133 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                         </span>
                       </div>
                     )}
+                  </div>
+                </>
+              )}
+            </div>
+            )}
+
+            {/* Button Visibility Settings */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setIsButtonsMenuOpen(!isButtonsMenuOpen)}
+                style={{
+                  background: hiddenButtons.length > 0 ? 'rgba(255,165,0,0.2)' : 'transparent',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  color: hiddenButtons.length > 0 ? '#ffa500' : '#888',
+                  cursor: 'pointer',
+                  padding: '6px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0px',
+                  borderRadius: '20px',
+                  fontSize: '0.85rem',
+                  fontWeight: '500',
+                  transition: 'all 0.3s ease',
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.color = '#fff';
+                  e.currentTarget.style.gap = '6px';
+                  e.currentTarget.querySelector('.btn-label').style.width = 'auto';
+                  e.currentTarget.querySelector('.btn-label').style.opacity = '1';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = hiddenButtons.length > 0 ? 'rgba(255,165,0,0.2)' : 'transparent';
+                  e.currentTarget.style.color = hiddenButtons.length > 0 ? '#ffa500' : '#888';
+                  e.currentTarget.style.gap = '0px';
+                  e.currentTarget.querySelector('.btn-label').style.width = '0';
+                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
+                }}
+              >
+                <SlidersHorizontal size={16} />
+                <span className="btn-label" style={{ 
+                  width: '0', 
+                  opacity: '0', 
+                  overflow: 'hidden', 
+                  transition: 'all 0.3s ease' 
+                }}>Buttons</span>
+              </button>
+
+              {isButtonsMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                    onClick={() => setIsButtonsMenuOpen(false)}
+                  />
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '100%',
+                    left: 0,
+                    marginBottom: '8px',
+                    background: '#1f1f1f',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    padding: '8px',
+                    minWidth: '180px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+                    zIndex: 100,
+                    backdropFilter: 'blur(10px)'
+                  }}>
+                    <div style={{
+                      fontSize: '0.8rem',
+                      color: '#888',
+                      fontWeight: '500',
+                      marginBottom: '8px',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid rgba(255,255,255,0.1)'
+                    }}>
+                      Show/Hide Buttons
+                    </div>
+                    
+                    {[
+                      { id: 'attach', label: 'Attach', icon: <Paperclip size={14} /> },
+                      { id: 'deepsearch', label: 'DeepSearch', icon: <Radar size={14} /> },
+                      { id: 'imagegen', label: 'Image Gen', icon: <Image size={14} /> },
+                      { id: 'mcptools', label: 'MCP Tools', icon: <Wrench size={14} /> }
+                    ].map(btn => (
+                      <div
+                        key={btn.id}
+                        onClick={() => toggleButtonVisibility(btn.id)}
+                        style={{
+                          padding: '8px 10px',
+                          cursor: 'pointer',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          transition: 'background 0.2s',
+                          marginBottom: '2px'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '4px',
+                          border: hiddenButtons.includes(btn.id) ? '1px solid #555' : 'none',
+                          background: hiddenButtons.includes(btn.id) ? 'transparent' : '#4caf50',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          {!hiddenButtons.includes(btn.id) && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ececec' }}>
+                          {btn.icon}
+                          {btn.label}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
@@ -1719,13 +1891,25 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                           <img 
                             src={msg.generatedImage.dataUrl}
                             alt="Generated image"
+                            onClick={() => setFullscreenImage(msg.generatedImage.dataUrl)}
                             style={{
                               maxWidth: '100%',
                               maxHeight: '512px',
                               borderRadius: '12px',
                               border: '1px solid rgba(255,255,255,0.1)',
-                              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+                              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                              cursor: 'pointer',
+                              transition: 'transform 0.2s, box-shadow 0.2s'
                             }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'scale(1.02)';
+                              e.currentTarget.style.boxShadow = '0 6px 30px rgba(0,0,0,0.5)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'scale(1)';
+                              e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+                            }}
+                            title="Click to view fullscreen"
                           />
                         </div>
                       )}
@@ -2035,6 +2219,74 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           </div>
           {inputBox}
         </>
+      )}
+
+      {/* Fullscreen Image Modal */}
+      {fullscreenImage && (
+        <div
+          onClick={() => setFullscreenImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.95)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'zoom-out',
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          <img
+            src={fullscreenImage}
+            alt="Fullscreen view"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '95vw',
+              maxHeight: '95vh',
+              objectFit: 'contain',
+              borderRadius: '8px',
+              boxShadow: '0 0 60px rgba(0,0,0,0.8)',
+              cursor: 'default'
+            }}
+          />
+          {/* Close button */}
+          <button
+            onClick={() => setFullscreenImage(null)}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              right: '20px',
+              background: 'rgba(255,255,255,0.1)',
+              border: 'none',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'white',
+              fontSize: '24px',
+              transition: 'background 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+          >
+            ×
+          </button>
+          {/* Hint text */}
+          <div style={{
+            position: 'absolute',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            color: 'rgba(255,255,255,0.5)',
+            fontSize: '0.85rem'
+          }}>
+            Click anywhere or press ESC to close
+          </div>
+        </div>
       )}
     </div>
   );
