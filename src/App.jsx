@@ -5,7 +5,10 @@ import TitleBar from './components/TitleBar';
 import LoginModal from './components/LoginModal';
 import ModelCreator from './components/ModelCreator';
 import SettingsModal from './components/SettingsModal';
-import { PanelLeft } from 'lucide-react';
+import IDEMode from './components/IDEMode';
+import IDEChatSidebar from './components/IDEChatSidebar';
+import IDEActivityBar from './components/IDEActivityBar';
+import { PanelLeft, MessageSquare } from 'lucide-react';
 
 // Get initial active chat ID from localStorage
 const getInitialActiveChatId = () => {
@@ -30,6 +33,30 @@ const App = () => {
   
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
+  
+  // IDE Mode State - persist to localStorage
+  const [isIDEMode, setIsIDEMode] = useState(() => {
+    return localStorage.getItem('ide-mode-active') === 'true';
+  });
+  const [showIDEChat, setShowIDEChat] = useState(() => {
+    const saved = localStorage.getItem('ide-chat-visible');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [ideActivePanel, setIdeActivePanel] = useState(() => {
+    return localStorage.getItem('ide-active-panel') || 'files';
+  });
+  const [ideSidePanelVisible, setIdeSidePanelVisible] = useState(() => {
+    const saved = localStorage.getItem('ide-sidepanel-visible');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Save IDE state to localStorage - combined into single effect
+  useEffect(() => {
+    localStorage.setItem('ide-mode-active', isIDEMode.toString());
+    localStorage.setItem('ide-chat-visible', showIDEChat.toString());
+    localStorage.setItem('ide-active-panel', ideActivePanel);
+    localStorage.setItem('ide-sidepanel-visible', ideSidePanelVisible.toString());
+  }, [isIDEMode, showIDEChat, ideActivePanel, ideSidePanelVisible]);
   const [appSettings, setAppSettings] = useState({
     inferenceProvider: 'local',
     hfApiKey: '',
@@ -213,7 +240,11 @@ const App = () => {
       color: 'white',
       overflow: 'hidden'
     }}>
-      <TitleBar />
+      <TitleBar 
+        isIDEMode={isIDEMode}
+        showIDEChat={showIDEChat}
+        onToggleIDEChat={() => setShowIDEChat(!showIDEChat)}
+      />
 
       <div style={{
         display: 'flex',
@@ -222,73 +253,134 @@ const App = () => {
         position: 'relative',
         background: '#151517'
       }}>
-        <div style={{
-          width: isSidebarOpen ? '260px' : '0px',
-          opacity: isSidebarOpen ? 1 : 0,
-          transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          willChange: 'width, opacity'
-        }}>
-          <div style={{ width: '260px', height: '100%' }}>
-            <Sidebar
-              chats={chats}
-              activeChatId={activeChatId}
-              onSelectChat={setActiveChatId}
-              onNewChat={handleNewChat}
-              onDeleteChat={handleDeleteChat}
-              onRenameChat={handleRenameChat}
-              onToggleSidebar={toggleSidebar}
-              hfUser={hfUser}
-              onOpenLoginModal={handleOpenLoginModal}
-              onHfLogout={handleHfLogout}
-              onOpenModelCreator={() => setShowModelCreator(true)}
-              onOpenSettings={() => setShowSettings(true)}
-            />
-          </div>
-        </div>
-
-        {!isSidebarOpen && (
-          <button
-            onClick={toggleSidebar}
-            style={{
-              position: 'absolute',
-              top: '16px',
-              left: '16px',
-              zIndex: 100,
-              background: 'rgba(15, 15, 25, 0.7)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: '#ececec',
-              cursor: 'pointer',
-              padding: '8px',
-              borderRadius: '8px',
+        {isIDEMode ? (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+            {/* IDE Main Area */}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+              {/* IDE Activity Bar */}
+              <IDEActivityBar
+                activePanel={ideActivePanel}
+                onPanelChange={setIdeActivePanel}
+                onExitIDE={() => setIsIDEMode(false)}
+                onOpenSettings={() => setShowSettings(true)}
+                isSidePanelVisible={ideSidePanelVisible}
+                onToggleSidePanel={() => setIdeSidePanelVisible(!ideSidePanelVisible)}
+                showChat={showIDEChat}
+                onToggleChat={() => setShowIDEChat(!showIDEChat)}
+              />
+              
+              {/* IDE Main Content */}
+              <IDEMode 
+                onExitIDE={() => setIsIDEMode(false)} 
+                activePanel={ideActivePanel}
+                isSidePanelVisible={ideSidePanelVisible}
+              />
+              
+              {/* IDE Chat Sidebar */}
+              {showIDEChat && (
+                <IDEChatSidebar 
+                  inferenceSettings={appSettings}
+                  onClose={() => setShowIDEChat(false)}
+                />
+              )}
+            </div>
+            
+            {/* Status Bar - Full Width */}
+            <div style={{
+              height: '22px',
+              background: '#1b1b1c',
+              borderTop: '1px solid rgba(255, 255, 255, 0.1)',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-              backdropFilter: 'blur(10px)',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(47, 47, 47, 0.9)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(15, 15, 25, 0.7)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-            }}
-          >
-            <PanelLeft size={24} />
-          </button>
-        )}
+              justifyContent: 'space-between',
+              padding: '0 10px',
+              fontSize: '0.7rem',
+              color: '#888',
+              flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span>Ready</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span>UTF-8</span>
+                <span>Ollama</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Normal Chat Mode */}
+            <div style={{
+              width: isSidebarOpen ? '260px' : '0px',
+              opacity: isSidebarOpen ? 1 : 0,
+              transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              willChange: 'width, opacity'
+            }}>
+              <div style={{ width: '260px', height: '100%' }}>
+                <Sidebar
+                  chats={chats}
+                  activeChatId={activeChatId}
+                  onSelectChat={setActiveChatId}
+                  onNewChat={handleNewChat}
+                  onDeleteChat={handleDeleteChat}
+                  onRenameChat={handleRenameChat}
+                  onToggleSidebar={toggleSidebar}
+                  hfUser={hfUser}
+                  onOpenLoginModal={handleOpenLoginModal}
+                  onHfLogout={handleHfLogout}
+                  onOpenModelCreator={() => setShowModelCreator(true)}
+                  onOpenSettings={() => setShowSettings(true)}
+                  onOpenIDE={() => setIsIDEMode(true)}
+                  isIDEMode={isIDEMode}
+                />
+              </div>
+            </div>
 
-        <ChatArea
-          activeChatId={activeChatId}
-          messages={activeChat?.messages || []}
-          onUpdateMessages={handleUpdateMessages}
-          onFirstMessage={handleFirstMessage}
-          inferenceSettings={appSettings}
-        />
+            {!isSidebarOpen && (
+              <button
+                onClick={toggleSidebar}
+                style={{
+                  position: 'absolute',
+                  top: '16px',
+                  left: '16px',
+                  zIndex: 100,
+                  background: 'rgba(15, 15, 25, 0.7)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#ececec',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s',
+                  backdropFilter: 'blur(10px)',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(47, 47, 47, 0.9)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(15, 15, 25, 0.7)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                }}
+              >
+                <PanelLeft size={24} />
+              </button>
+            )}
+
+            <ChatArea
+              activeChatId={activeChatId}
+              messages={activeChat?.messages || []}
+              onUpdateMessages={handleUpdateMessages}
+              onFirstMessage={handleFirstMessage}
+              inferenceSettings={appSettings}
+            />
+          </>
+        )}
       </div>
 
       <LoginModal
@@ -313,6 +405,7 @@ const App = () => {
         settings={appSettings}
         onSaveSettings={handleSaveSettings}
       />
+
     </div>
   );
 };

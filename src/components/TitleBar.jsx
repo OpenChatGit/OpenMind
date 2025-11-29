@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Minus, Square, X } from 'lucide-react';
+import { Minus, Square, X, PanelRight } from 'lucide-react';
 import DonationButton from './DonationButton';
 
-const TitleBar = () => {
+const TitleBar = ({ isIDEMode, showIDEChat, onToggleIDEChat }) => {
     const [isMaximized, setIsMaximized] = useState(false);
 
     const handleMinimize = () => {
@@ -43,6 +43,23 @@ const TitleBar = () => {
             {/* Donation + Window Controls */}
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', paddingRight: '16px', gap: '12px', WebkitAppRegion: 'no-drag' }}>
                 <DonationButton />
+                
+                {/* IDE Chat Toggle - only show in IDE mode */}
+                {isIDEMode && (
+                    <button
+                        onClick={onToggleIDEChat}
+                        style={{
+                            ...buttonStyle,
+                            background: showIDEChat ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                            color: showIDEChat ? '#6366f1' : '#ececec'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = showIDEChat ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.1)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = showIDEChat ? 'rgba(99, 102, 241, 0.2)' : 'transparent'}
+                        title={showIDEChat ? 'Hide Chat' : 'Show Chat'}
+                    >
+                        <PanelRight size={16} />
+                    </button>
+                )}
                 
                 {/* Window Controls */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

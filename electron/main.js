@@ -834,6 +834,16 @@ ipcMain.handle('open-external', async (event, url) => {
     return { success: true };
 });
 
+// Reveal file/folder in system file explorer
+ipcMain.handle('reveal-in-explorer', async (event, filePath) => {
+    try {
+        shell.showItemInFolder(filePath);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
 // Image Selection for Vision Models
 ipcMain.handle('select-images', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -1264,6 +1274,268 @@ ipcMain.handle('save-settings', async (event, settings) => {
         return { success: true };
     } catch (error) {
         console.error('Error saving settings:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// IDE File System Handlers
+const projectsFolder = path.join(__dirname, '..', 'projects');
+
+// Ensure projects folder exists
+if (!fs.existsSync(projectsFolder)) {
+    fs.mkdirSync(projectsFolder, { recursive: true });
+}
+
+ipcMain.handle('ide-get-projects-folder', async () => {
+    return { success: true, folderPath: projectsFolder };
+});
+
+ipcMain.handle('ide-create-project', async (event, projectName) => {
+    try {
+        const projectPath = path.join(projectsFolder, projectName);
+        if (fs.existsSync(projectPath)) {
+            return { success: false, error: 'Project already exists' };
+        }
+        fs.mkdirSync(projectPath, { recursive: true });
+        // Create basic files
+        fs.writeFileSync(path.join(projectPath, 'README.md'), `# ${projectName}\n\nNew project created with OpenMind IDE.`);
+        return { success: true, projectPath };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-list-projects', async () => {
+    try {
+        if (!fs.existsSync(projectsFolder)) {
+            return { success: true, projects: [] };
+        }
+        const entries = fs.readdirSync(projectsFolder, { withFileTypes: true });
+        const projects = entries
+            .filter(e => e.isDirectory())
+            .map(e => ({
+                name: e.name,
+                path: path.join(projectsFolder, e.name)
+            }));
+        return { success: true, projects };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-select-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false };
+    }
+    return { success: true, folderPath: result.filePaths[0] };
+});
+
+ipcMain.handle('ide-read-directory', async (event, folderPath) => {
+    try {
+        const items = [];
+        const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+        
+        for (const entry of entries) {
+            const fullPath = path.join(folderPath, entry.name);
+            const stats = fs.statSync(fullPath);
+            items.push({
+                name: entry.name,
+                path: fullPath,
+                isDirectory: entry.isDirectory(),
+                size: stats.size,
+                modified: stats.mtime
+            });
+        }
+        
+        // Sort: folders first, then files, alphabetically
+        items.sort((a, b) => {
+            if (a.isDirectory && !b.isDirectory) return -1;
+            if (!a.isDirectory && b.isDirectory) return 1;
+            return a.name.localeCompare(b.name);
+        });
+        
+        return { success: true, items };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-create-file', async (event, { filePath, content = '' }) => {
+    try {
+        fs.writeFileSync(filePath, content, 'utf8');
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-create-folder', async (event, folderPath) => {
+    try {
+        fs.mkdirSync(folderPath, { recursive: true });
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-get-stats', async (event, filePath) => {
+    try {
+        const stats = fs.statSync(filePath);
+        return { 
+            success: true, 
+            isDirectory: stats.isDirectory(),
+            isFile: stats.isFile(),
+            size: stats.size,
+            modified: stats.mtime
+        };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-read-file', async (event, filePath) => {
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        return { success: true, content };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-save-file', async (event, { filePath, content }) => {
+    try {
+        fs.writeFileSync(filePath, content, 'utf8');
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-delete-file', async (event, filePath) => {
+    try {
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+            fs.rmSync(filePath, { recursive: true });
+        } else {
+            fs.unlinkSync(filePath);
+        }
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('ide-rename-file', async (event, { oldPath, newPath }) => {
+    try {
+        fs.renameSync(oldPath, newPath);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Check if folder is a git repository
+ipcMain.handle('ide-git-status', async (event, rootPath) => {
+    try {
+        const gitDir = path.join(rootPath, '.git');
+        if (!fs.existsSync(gitDir)) {
+            return { success: true, isRepo: false };
+        }
+        
+        // Read HEAD to get current branch
+        const headPath = path.join(gitDir, 'HEAD');
+        const headContent = fs.readFileSync(headPath, 'utf8').trim();
+        let branch = 'HEAD';
+        if (headContent.startsWith('ref: refs/heads/')) {
+            branch = headContent.replace('ref: refs/heads/', '');
+        }
+        
+        return { success: true, isRepo: true, branch };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Search in files
+ipcMain.handle('ide-search-files', async (event, { rootPath, query, options = {} }) => {
+    try {
+        const results = [];
+        const { caseSensitive = false, wholeWord = false, useRegex = false } = options;
+        
+        // Build search pattern
+        let pattern = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (wholeWord) {
+            pattern = `\\b${pattern}\\b`;
+        }
+        const flags = caseSensitive ? 'g' : 'gi';
+        let searchRegex;
+        try {
+            searchRegex = new RegExp(pattern, flags);
+        } catch (e) {
+            return { success: false, error: 'Invalid search pattern' };
+        }
+        
+        const searchDir = async (dirPath) => {
+            let entries;
+            try {
+                entries = fs.readdirSync(dirPath, { withFileTypes: true });
+            } catch (e) {
+                return;
+            }
+            
+            for (const entry of entries) {
+                // Skip hidden folders, node_modules, dist, build
+                if (entry.name.startsWith('.') || 
+                    entry.name === 'node_modules' || 
+                    entry.name === 'dist' ||
+                    entry.name === 'build' ||
+                    entry.name === '.git') continue;
+                
+                const fullPath = path.join(dirPath, entry.name);
+                
+                if (entry.isDirectory()) {
+                    await searchDir(fullPath);
+                } else {
+                    // Skip binary and large files
+                    const ext = entry.name.split('.').pop()?.toLowerCase();
+                    const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'ico', 'svg', 'woff', 'woff2', 'ttf', 'eot', 'mp3', 'mp4', 'zip', 'tar', 'gz', 'pdf'];
+                    if (binaryExts.includes(ext)) continue;
+                    
+                    try {
+                        const stats = fs.statSync(fullPath);
+                        if (stats.size > 1024 * 1024) continue; // Skip files > 1MB
+                        
+                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const lines = content.split('\n');
+                        
+                        lines.forEach((line, index) => {
+                            searchRegex.lastIndex = 0;
+                            if (searchRegex.test(line)) {
+                                results.push({
+                                    file: fullPath,
+                                    fileName: entry.name,
+                                    line: index + 1,
+                                    content: line.trim().substring(0, 300),
+                                    relativePath: path.relative(rootPath, path.dirname(fullPath))
+                                });
+                            }
+                        });
+                    } catch (e) {
+                        // Skip unreadable files
+                    }
+                }
+                
+                // Limit results
+                if (results.length >= 500) return;
+            }
+        };
+        
+        await searchDir(rootPath);
+        return { success: true, results };
+    } catch (error) {
         return { success: false, error: error.message };
     }
 });

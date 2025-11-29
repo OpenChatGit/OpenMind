@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // External Links
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
+    revealInExplorer: (filePath) => ipcRenderer.invoke('reveal-in-explorer', filePath),
     
     // Model Creator API
     createOllamaModel: (config) => ipcRenderer.invoke('create-ollama-model', config),
@@ -71,5 +72,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // HuggingFace Inference API
     getHfInferenceModels: () => ipcRenderer.invoke('hf-get-inference-models'),
     searchHfInferenceModels: (query) => ipcRenderer.invoke('hf-search-inference-models', query),
-    sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages })
+    sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages }),
+    
+    // IDE File System API
+    ideSelectFolder: () => ipcRenderer.invoke('ide-select-folder'),
+    ideGetProjectsFolder: () => ipcRenderer.invoke('ide-get-projects-folder'),
+    ideCreateProject: (projectName) => ipcRenderer.invoke('ide-create-project', projectName),
+    ideListProjects: () => ipcRenderer.invoke('ide-list-projects'),
+    ideReadDirectory: (folderPath) => ipcRenderer.invoke('ide-read-directory', folderPath),
+    ideCreateFile: (filePath, content) => ipcRenderer.invoke('ide-create-file', { filePath, content }),
+    ideCreateFolder: (folderPath) => ipcRenderer.invoke('ide-create-folder', folderPath),
+    ideReadFile: (filePath) => ipcRenderer.invoke('ide-read-file', filePath),
+    ideSaveFile: (filePath, content) => ipcRenderer.invoke('ide-save-file', { filePath, content }),
+    ideDeleteFile: (filePath) => ipcRenderer.invoke('ide-delete-file', filePath),
+    ideRenameFile: (oldPath, newPath) => ipcRenderer.invoke('ide-rename-file', { oldPath, newPath }),
+    ideSearchFiles: (rootPath, query, options) => ipcRenderer.invoke('ide-search-files', { rootPath, query, options }),
+    ideGetStats: (filePath) => ipcRenderer.invoke('ide-get-stats', filePath),
+    ideGitStatus: (rootPath) => ipcRenderer.invoke('ide-git-status', rootPath)
 });

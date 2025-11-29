@@ -18,16 +18,20 @@
     "@modelcontextprotocol/sdk": "^1.22.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.4.0",
+    "file-icons-js": "^1.1.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.554.0",
+    "prism-react-renderer": "^2.4.1",
     "puppeteer-core": "^24.31.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-file-icon": "^1.6.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.5.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
-    "three": "^0.181.2"
+    "three": "^0.181.2",
+    "vscode-icons-js": "^11.6.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

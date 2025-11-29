@@ -93,14 +93,16 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       const models = await window.electronAPI.getOllamaModels();
       if (models && models.length > 0) {
         setAvailableModels(models.map(m => m.name));
-        if (inferenceProvider === 'local' && (!selectedModel || selectedModel === 'No Models Found')) {
-          setSelectedModel(models[0].name);
-        }
+        // Only set default model if none selected - use functional update to avoid dependency
+        setSelectedModel(prev => {
+          if (!prev || prev === 'No Models Found') {
+            return models[0].name;
+          }
+          return prev;
+        });
       } else {
         setAvailableModels([]);
-        if (inferenceProvider === 'local') {
-          setSelectedModel('No Models Found');
-        }
+        setSelectedModel(prev => prev || 'No Models Found');
       }
     }
     
@@ -109,12 +111,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       const result = await window.electronAPI.getHfInferenceModels();
       if (result?.success && result.models) {
         setHfModels(result.models);
-        if (inferenceProvider === 'huggingface' && !selectedModel) {
-          setSelectedModel(result.models[0]?.id || '');
-        }
       }
     }
-  }, [selectedModel, inferenceProvider]);
+  }, []); // No dependencies - only runs on mount and when explicitly called
 
   // Handle provider change - select appropriate default model
   // Only auto-select when switching providers, not when user manually selects a model

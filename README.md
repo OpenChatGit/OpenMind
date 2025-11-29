@@ -16,6 +16,7 @@ A modern AI chat application built with Electron, React, and local LLM support v
 - 📊 **Inference Stats** - Token counts, speed, duration (like Ollama verbose)
 - 🔄 **Regenerate** - Re-run any AI response
 - 📋 **Copy** - One-click copy AI responses
+- 🛠️ **IDE Mode** - Built-in code editor with VS Code-style interface (v1 - Beta)
 
 ## Quick Start
 
@@ -198,7 +199,52 @@ The reasoning is shown in a collapsible "Reasoning" section above the response.
 └── mcp-tools/         # MCP tool servers
 ```
 
+## IDE Mode (v1 - Beta)
+
+OpenMind includes a built-in IDE mode for coding directly within the app. Click the **Code** button in the sidebar to switch to IDE mode.
+
+> ⚠️ **Note:** IDE Mode is currently in v1 (Beta). Some features may be incomplete or have bugs. We're actively improving it!
+
+### IDE Features
+
+- 📁 **File Explorer** - Browse, create, rename, and delete files/folders
+- 📝 **Code Editor** - Syntax highlighting for 30+ languages (JS, TS, Python, etc.)
+- 🗂️ **Tab Management** - Multiple open files with unsaved changes indicator
+- 🔍 **Search in Files** - VS Code-style search with regex support
+- 💬 **Integrated AI Chat** - Ask questions about your code in the sidebar
+- ⌨️ **Keyboard Shortcuts** - Ctrl+S (save), Ctrl+W (close tab), etc.
+- 📄 **Markdown Preview** - Preview .md files with syntax highlighting
+- 🎨 **VS Code Icons** - Familiar file/folder icons
+- 🔄 **Project Management** - Create new projects or open existing folders
+
+### IDE Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+S` | Save current file |
+| `Ctrl+W` | Close current tab |
+| `Ctrl+Shift+F` | Focus search |
+| `Ctrl+Shift+C` | Toggle AI chat |
+| `Ctrl+B` | Toggle sidebar |
+
+### Known Limitations (v1)
+
+- Git integration is read-only (shows branch name only)
+- No terminal integration yet
+- Extensions panel is placeholder
+- Debug panel is placeholder
+
 ## Recent Changes
+
+### IDE Mode (NEW!)
+- ✅ **Built-in IDE** - VS Code-style code editor integrated into the app
+- ✅ **File Explorer** - Full file system navigation with context menus
+- ✅ **Syntax Highlighting** - Support for 30+ programming languages
+- ✅ **AI Chat Sidebar** - Ask questions about your code while editing
+- ✅ **Search in Files** - Find text across your entire project
+- ✅ **Tab Management** - Multiple files with unsaved changes tracking
+- ✅ **Markdown Preview** - Preview markdown files with styling
+- ✅ **Performance Optimized** - Memoized components to prevent unnecessary re-renders
 
 ### Image Generation Improvements
 - ✅ **CUDA/GPU Support** - Fast image generation with NVIDIA GPUs
