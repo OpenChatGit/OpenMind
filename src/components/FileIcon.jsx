@@ -610,6 +610,18 @@ const FileIcon = memo(({ filename, isFolder = false, isOpen = false, size = 16 }
   }
   // Otherwise keep original Seti UI colors
 
+  // Normalize SVG to ensure consistent sizing
+  // Add viewBox if missing and remove fixed width/height
+  let normalizedSvg = coloredSvg
+    .replace(/width="[^"]*"/g, '')
+    .replace(/height="[^"]*"/g, '')
+    .replace(/<svg/, `<svg width="${size}" height="${size}" style="display:block"`);
+  
+  // Add viewBox if not present
+  if (!normalizedSvg.includes('viewBox')) {
+    normalizedSvg = normalizedSvg.replace(/<svg/, '<svg viewBox="0 0 32 32"');
+  }
+
   return (
     <span 
       style={{ 
@@ -620,7 +632,7 @@ const FileIcon = memo(({ filename, isFolder = false, isOpen = false, size = 16 }
         justifyContent: 'center',
         flexShrink: 0
       }}
-      dangerouslySetInnerHTML={{ __html: coloredSvg }}
+      dangerouslySetInnerHTML={{ __html: normalizedSvg }}
     />
   );
 });

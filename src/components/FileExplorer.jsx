@@ -313,8 +313,8 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               paddingLeft: `${paddingLeft + 18}px`
             }}>
               {inlineCreate.type === 'file' && (
-                <span style={{ marginRight: '6px' }}>
-                  <FileIcon filename={inlineValue || 'newfile'} size={18} />
+                <span style={{ marginRight: '8px', display: 'flex', alignItems: 'center', minWidth: '20px', justifyContent: 'center', overflow: 'visible' }}>
+                  <FileIcon filename={inlineValue || 'newfile'} size={20} />
                 </span>
               )}
               <input
@@ -371,8 +371,8 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           if (!isSelected) e.currentTarget.style.background = 'transparent';
         }}
       >
-        <span style={{ marginRight: '6px', display: 'flex', alignItems: 'center' }}>
-          <FileIcon filename={item.name} size={18} />
+        <span style={{ marginRight: '8px', display: 'flex', alignItems: 'center', minWidth: '20px', justifyContent: 'center', overflow: 'visible' }}>
+          <FileIcon filename={item.name} size={20} />
         </span>
         {/* Inline rename for file */}
         {inlineRename?.path === item.path ? (
@@ -483,8 +483,8 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           paddingLeft: '30px'
         }}>
           {inlineCreate.type === 'file' && (
-            <span style={{ marginRight: '6px' }}>
-              <FileIcon filename={inlineValue || 'newfile'} size={18} />
+            <span style={{ marginRight: '8px', display: 'flex', alignItems: 'center', minWidth: '20px', justifyContent: 'center', overflow: 'visible' }}>
+              <FileIcon filename={inlineValue || 'newfile'} size={20} />
             </span>
           )}
           <input
