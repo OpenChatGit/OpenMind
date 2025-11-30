@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import TitleBar from './components/TitleBar';
@@ -8,6 +8,7 @@ import SettingsModal from './components/SettingsModal';
 import IDEMode from './components/IDEMode';
 import IDEChatSidebar from './components/IDEChatSidebar';
 import IDEActivityBar from './components/IDEActivityBar';
+import { useTheme } from './contexts/ThemeContext';
 import { PanelLeft, MessageSquare } from 'lucide-react';
 
 // Get initial active chat ID from localStorage
@@ -17,6 +18,8 @@ const getInitialActiveChatId = () => {
 };
 
 const App = () => {
+  const { theme, isDark } = useTheme();
+  const ideModeRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(getInitialActiveChatId);
@@ -48,6 +51,17 @@ const App = () => {
   const [ideSidePanelVisible, setIdeSidePanelVisible] = useState(() => {
     const saved = localStorage.getItem('ide-sidepanel-visible');
     return saved !== null ? saved === 'true' : true;
+  });
+  const [ideStatus, setIdeStatus] = useState({
+    line: 1,
+    column: 1,
+    language: '',
+    encoding: 'UTF-8',
+    lineEnding: 'CRLF',
+    indentation: 'Spaces: 2',
+    gitBranch: 'main',
+    errorCount: 0,
+    warningCount: 0
   });
 
   // Save IDE state to localStorage - combined into single effect
@@ -228,6 +242,265 @@ const App = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
 
+  // Handle IDE menu actions
+  const handleIDEAction = useCallback((action) => {
+    switch (action) {
+      // File menu
+      case 'newFile':
+        ideModeRef.current?.newFile();
+        break;
+      case 'newFileAdvanced':
+        ideModeRef.current?.newFile();
+        break;
+      case 'openFile':
+        ideModeRef.current?.openFile();
+        break;
+      case 'openFolder':
+        ideModeRef.current?.openFolder();
+        break;
+      case 'save':
+        ideModeRef.current?.saveCurrentFile();
+        break;
+      case 'saveAs':
+        ideModeRef.current?.saveFileAs();
+        break;
+      case 'saveAll':
+        ideModeRef.current?.saveAllFiles();
+        break;
+      case 'revertFile':
+        ideModeRef.current?.revertFile();
+        break;
+      case 'closeEditor':
+        ideModeRef.current?.closeCurrentTab();
+        break;
+      case 'closeFolder':
+        ideModeRef.current?.closeFolder();
+        break;
+      case 'exit':
+        window.electronAPI?.close();
+        break;
+      
+      // Edit menu
+      case 'undo':
+        ideModeRef.current?.editorAction('undo');
+        break;
+      case 'redo':
+        ideModeRef.current?.editorAction('redo');
+        break;
+      case 'cut':
+        ideModeRef.current?.editorAction('cut');
+        break;
+      case 'copy':
+        ideModeRef.current?.editorAction('copy');
+        break;
+      case 'paste':
+        ideModeRef.current?.editorAction('paste');
+        break;
+      case 'toggleLineComment':
+        ideModeRef.current?.editorAction('toggleLineComment');
+        break;
+      case 'toggleBlockComment':
+        ideModeRef.current?.editorAction('toggleBlockComment');
+        break;
+      case 'findInFiles':
+        setIdeActivePanel('search');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      
+      // Selection menu
+      case 'selectAll':
+        ideModeRef.current?.editorAction('selectAll');
+        break;
+      case 'copyLineUp':
+        ideModeRef.current?.editorAction('copyLineUp');
+        break;
+      case 'copyLineDown':
+        ideModeRef.current?.editorAction('copyLineDown');
+        break;
+      case 'moveLineUp':
+        ideModeRef.current?.editorAction('moveLineUp');
+        break;
+      case 'moveLineDown':
+        ideModeRef.current?.editorAction('moveLineDown');
+        break;
+      case 'duplicateSelection':
+        ideModeRef.current?.editorAction('duplicateSelection');
+        break;
+      
+      // View menu
+      case 'viewExplorer':
+        setIdeActivePanel('files');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      case 'viewSearch':
+        setIdeActivePanel('search');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      case 'viewGit':
+        setIdeActivePanel('git');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      case 'viewRun':
+        setIdeActivePanel('debug');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      case 'viewExtensions':
+        setIdeActivePanel('extensions');
+        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
+        break;
+      case 'toggleSidebar':
+        setIdeSidePanelVisible(prev => !prev);
+        break;
+      case 'toggleChat':
+        setShowIDEChat(prev => !prev);
+        break;
+      case 'toggleWordWrap':
+        ideModeRef.current?.toggleWordWrap();
+        break;
+      case 'about':
+        alert('OpenMind IDE v1.0\n\nAI-powered code development with local Ollama models.');
+        break;
+      
+      // Terminal menu
+      case 'newTerminal':
+      case 'viewTerminal':
+        ideModeRef.current?.openTerminal();
+        break;
+      case 'runActiveFile':
+        ideModeRef.current?.runActiveFile();
+        break;
+      default:
+        console.log('IDE Action:', action);
+    }
+  }, [ideSidePanelVisible]);
+
+  // Global keyboard shortcuts for IDE mode
+  useEffect(() => {
+    if (!isIDEMode) return;
+
+    const handleKeyDown = (e) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const alt = e.altKey;
+
+      // File menu shortcuts
+      if (ctrl && !shift && !alt && e.key === 'n') {
+        e.preventDefault();
+        handleIDEAction('newFile');
+      }
+      if (ctrl && !shift && !alt && e.key === 'o') {
+        e.preventDefault();
+        handleIDEAction('openFile');
+      }
+      if (ctrl && !shift && !alt && e.key === 's') {
+        e.preventDefault();
+        handleIDEAction('save');
+      }
+      if (ctrl && shift && !alt && e.key === 'S') {
+        e.preventDefault();
+        handleIDEAction('saveAs');
+      }
+      if (ctrl && !shift && !alt && e.key === 'F4') {
+        e.preventDefault();
+        handleIDEAction('closeEditor');
+      }
+      if (ctrl && !shift && !alt && e.key === 'w') {
+        e.preventDefault();
+        handleIDEAction('closeEditor');
+      }
+
+      // Edit menu shortcuts
+      if (ctrl && !shift && !alt && e.key === 'z') {
+        e.preventDefault();
+        handleIDEAction('undo');
+      }
+      if (ctrl && !shift && !alt && e.key === 'y') {
+        e.preventDefault();
+        handleIDEAction('redo');
+      }
+      if (ctrl && shift && !alt && e.key === 'Z') {
+        e.preventDefault();
+        handleIDEAction('redo');
+      }
+      if (ctrl && !shift && !alt && e.key === '/') {
+        e.preventDefault();
+        handleIDEAction('toggleLineComment');
+      }
+      if (ctrl && shift && !alt && e.key === 'F') {
+        e.preventDefault();
+        handleIDEAction('findInFiles');
+      }
+      if (shift && alt && !ctrl && e.key === 'A') {
+        e.preventDefault();
+        handleIDEAction('toggleBlockComment');
+      }
+
+      // Selection menu shortcuts
+      if (ctrl && !shift && !alt && e.key === 'a') {
+        // Let default select all work in textarea
+      }
+      if (ctrl && !shift && !alt && e.key === 'd') {
+        e.preventDefault();
+        handleIDEAction('duplicateSelection');
+      }
+      if (shift && alt && !ctrl && e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleIDEAction('copyLineUp');
+      }
+      if (shift && alt && !ctrl && e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleIDEAction('copyLineDown');
+      }
+      if (alt && !ctrl && !shift && e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleIDEAction('moveLineUp');
+      }
+      if (alt && !ctrl && !shift && e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleIDEAction('moveLineDown');
+      }
+
+      // View menu shortcuts
+      if (ctrl && shift && !alt && e.key === 'E') {
+        e.preventDefault();
+        handleIDEAction('viewExplorer');
+      }
+      if (ctrl && shift && !alt && e.key === 'G') {
+        e.preventDefault();
+        handleIDEAction('viewGit');
+      }
+      if (ctrl && shift && !alt && e.key === 'D') {
+        e.preventDefault();
+        handleIDEAction('viewRun');
+      }
+      if (ctrl && shift && !alt && e.key === 'X') {
+        e.preventDefault();
+        handleIDEAction('viewExtensions');
+      }
+      if (ctrl && !shift && !alt && e.key === 'b') {
+        e.preventDefault();
+        handleIDEAction('toggleSidebar');
+      }
+      if (ctrl && shift && !alt && e.key === 'C') {
+        e.preventDefault();
+        handleIDEAction('toggleChat');
+      }
+      if (alt && !ctrl && !shift && e.key === 'z') {
+        e.preventDefault();
+        handleIDEAction('toggleWordWrap');
+      }
+      
+      // Terminal shortcut (Ctrl+Shift+ö or Ctrl+`)
+      if (ctrl && shift && (e.key === 'ö' || e.key === '`')) {
+        e.preventDefault();
+        handleIDEAction('newTerminal');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isIDEMode, handleIDEAction]);
+
   const activeChat = chats.find(c => c.id === activeChatId);
 
   return (
@@ -236,14 +509,16 @@ const App = () => {
       flexDirection: 'column',
       height: '100vh',
       width: '100vw',
-      background: '#151517',
-      color: 'white',
-      overflow: 'hidden'
+      background: theme.bg,
+      color: theme.text,
+      overflow: 'hidden',
+      transition: 'background 0.3s, color 0.3s'
     }}>
       <TitleBar 
         isIDEMode={isIDEMode}
         showIDEChat={showIDEChat}
         onToggleIDEChat={() => setShowIDEChat(!showIDEChat)}
+        onIDEAction={handleIDEAction}
       />
 
       <div style={{
@@ -251,13 +526,13 @@ const App = () => {
         flex: 1,
         overflow: 'hidden',
         position: 'relative',
-        background: '#151517'
+        background: theme.bg
       }}>
         {isIDEMode ? (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             {/* IDE Main Area */}
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* IDE Activity Bar */}
+              {/* IDE Activity Bar - Fixed 48px, never shrinks */}
               <IDEActivityBar
                 activePanel={ideActivePanel}
                 onPanelChange={setIdeActivePanel}
@@ -269,14 +544,16 @@ const App = () => {
                 onToggleChat={() => setShowIDEChat(!showIDEChat)}
               />
               
-              {/* IDE Main Content */}
+              {/* IDE Main Content - flex: 1, shrinks when chat opens */}
               <IDEMode 
+                ref={ideModeRef}
                 onExitIDE={() => setIsIDEMode(false)} 
                 activePanel={ideActivePanel}
                 isSidePanelVisible={ideSidePanelVisible}
+                onStatusChange={setIdeStatus}
               />
               
-              {/* IDE Chat Sidebar */}
+              {/* IDE Chat Sidebar - only rendered when visible */}
               {showIDEChat && (
                 <IDEChatSidebar 
                   inferenceSettings={appSettings}
@@ -285,25 +562,155 @@ const App = () => {
               )}
             </div>
             
-            {/* Status Bar - Full Width */}
+            {/* Status Bar - VS Code Style */}
             <div style={{
               height: '22px',
-              background: '#1b1b1c',
-              borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+              background: theme.bgSecondary,
+              borderTop: `1px solid ${theme.border}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '0 10px',
+              padding: '0',
               fontSize: '0.7rem',
-              color: '#888',
+              color: theme.textSecondary,
               flexShrink: 0
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span>Ready</span>
+              {/* Left Side */}
+              <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                {/* Git Branch */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '4px', 
+                  padding: '0 8px',
+                  height: '100%',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4.75 7a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zM4.75 2a2.75 2.75 0 0 0-.87 5.36v1.39c0 .138.112.25.25.25h.25v5.25a.75.75 0 0 0 1.5 0V9h.25a.25.25 0 0 0 .25-.25V7.36A2.75 2.75 0 0 0 4.75 2zm6.5 5a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zm0-5a2.75 2.75 0 0 0-.87 5.36v.89a.25.25 0 0 1-.25.25H9.5a.75.75 0 0 0 0 1.5h.63a1.75 1.75 0 0 0 1.75-1.75v-.89A2.75 2.75 0 0 0 11.25 2z"/>
+                  </svg>
+                  <span>{ideStatus.gitBranch}</span>
+                </div>
+                {/* Sync */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  padding: '0 6px',
+                  height: '100%',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2.5 2v4H1V1h5v1.5H2.5zm11 0h-4V1h5v5h-1.5V2.5h-.5zM2.5 14V10H1v5h5v-1.5H2.5zm11 0h-4v1.5h5V10h-1.5v4h-.5z"/>
+                  </svg>
+                </div>
+                {/* Errors & Warnings */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px',
+                  padding: '0 8px',
+                  height: '100%',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.errorCount > 0 ? '#f14c4c' : 'inherit' }}>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11zM7.25 4v5h1.5V4h-1.5zm0 6v1.5h1.5V10h-1.5z"/>
+                    </svg>
+                    {ideStatus.errorCount}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.warningCount > 0 ? '#cca700' : 'inherit' }}>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M7.56 1h.88l6.54 12.26-.44.74H1.44l-.42-.74L7.56 1zm.44 1.67L2.63 13h10.74L8 2.67zM7.25 6v4h1.5V6h-1.5zm0 5v1.5h1.5V11h-1.5z"/>
+                    </svg>
+                    {ideStatus.warningCount}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span>UTF-8</span>
-                <span>Ollama</span>
+              
+              {/* Right Side */}
+              <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                {/* Line & Column */}
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  Ln {ideStatus.line}, Col {ideStatus.column}
+                </div>
+                {/* Spaces */}
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  {ideStatus.indentation}
+                </div>
+                {/* Encoding */}
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  {ideStatus.encoding}
+                </div>
+                {/* Line Ending */}
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  {ideStatus.lineEnding}
+                </div>
+                {/* Language */}
+                {ideStatus.language && (
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  {ideStatus.language}
+                </div>
+                )}
+                {/* Notifications */}
+                <div style={{ 
+                  padding: '0 8px',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 1.5A5.5 5.5 0 0 0 2.5 7v3.5l-1 1V13h13v-1.5l-1-1V7A5.5 5.5 0 0 0 8 1.5zm0 13a2 2 0 0 1-2-2h4a2 2 0 0 1-2 2z"/>
+                  </svg>
+                </div>
               </div>
             </div>
           </div>
@@ -346,9 +753,9 @@ const App = () => {
                   top: '16px',
                   left: '16px',
                   zIndex: 100,
-                  background: 'rgba(15, 15, 25, 0.7)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: '#ececec',
+                  background: isDark ? 'rgba(15, 15, 25, 0.7)' : 'rgba(255, 255, 255, 0.9)',
+                  border: `1px solid ${theme.border}`,
+                  color: theme.text,
                   cursor: 'pointer',
                   padding: '8px',
                   borderRadius: '8px',
@@ -357,15 +764,13 @@ const App = () => {
                   justifyContent: 'center',
                   transition: 'all 0.2s',
                   backdropFilter: 'blur(10px)',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                  boxShadow: isDark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.1)'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(47, 47, 47, 0.9)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.background = theme.bgActive;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(15, 15, 25, 0.7)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.background = isDark ? 'rgba(15, 15, 25, 0.7)' : 'rgba(255, 255, 255, 0.9)';
                 }}
               >
                 <PanelLeft size={24} />

@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Files, Search, GitBranch, Bug, Blocks, MessageSquare, Settings, ArrowLeft } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 
 const IDEActivityBar = memo(({ 
   activePanel, 
@@ -11,6 +12,8 @@ const IDEActivityBar = memo(({
   showChat,
   onToggleChat
 }) => {
+  const { theme, isDark } = useTheme();
+  
   // Memoize button config to prevent recreation
   const topButtons = useMemo(() => [
     { id: 'files', icon: Files, title: 'Explorer (Ctrl+Shift+E)' },
@@ -46,8 +49,8 @@ const IDEActivityBar = memo(({
           height: '48px',
           background: 'transparent',
           border: 'none',
-          borderLeft: isActive ? '2px solid #ececec' : '2px solid transparent',
-          color: isActive ? '#ececec' : '#888',
+          borderLeft: isActive ? `2px solid ${theme.text}` : '2px solid transparent',
+          color: isActive ? theme.text : theme.textSecondary,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -57,12 +60,12 @@ const IDEActivityBar = memo(({
         }}
         onMouseEnter={(e) => {
           if (!isActive) {
-            e.currentTarget.style.color = '#ececec';
+            e.currentTarget.style.color = theme.text;
           }
         }}
         onMouseLeave={(e) => {
           if (!isActive) {
-            e.currentTarget.style.color = '#888';
+            e.currentTarget.style.color = theme.textSecondary;
           }
         }}
         title={btn.title}
@@ -75,8 +78,10 @@ const IDEActivityBar = memo(({
   return (
     <div style={{
       width: '48px',
+      minWidth: '48px',
+      flexShrink: 0,
       height: '100%',
-      background: '#1b1b1c',
+      background: theme.bgSecondary,
       borderRight: '1px solid rgba(255, 255, 255, 0.1)',
       display: 'flex',
       flexDirection: 'column',

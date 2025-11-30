@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Eye, Trash2, Pencil, Copy, FilePlus, FolderPlus, ExternalLink } from 'lucide-react';
 import FileIcon from './FileIcon';
+import { useTheme } from '../contexts/ThemeContext';
 
 const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreviewFile, onRefresh }, ref) => {
+  const { theme, isDark } = useTheme();
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [folderContents, setFolderContents] = useState({});
   const [selectedPath, setSelectedPath] = useState(null);
@@ -255,7 +257,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               paddingLeft: `${paddingLeft}px`,
               cursor: 'pointer',
               background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-              color: '#ececec',
+              color: theme.text,
               fontSize: '0.82rem',
               userSelect: 'none',
               transition: 'background 0.1s'
@@ -272,9 +274,6 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               style={{ display: 'flex', alignItems: 'center', marginRight: '4px', color: '#888' }}
             >
               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </span>
-            <span style={{ marginRight: '6px' }}>
-              <FileIcon filename={item.name} isFolder={true} isOpen={isExpanded} size={16} />
             </span>
             {/* Inline rename for folder */}
             {inlineRename?.path === item.path ? (
@@ -294,7 +293,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
                   border: '1px solid #007acc',
                   borderRadius: '2px',
                   padding: '1px 4px',
-                  color: '#ececec',
+                  color: theme.text,
                   fontSize: '0.82rem',
                   outline: 'none'
                 }}
@@ -313,13 +312,11 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               padding: '3px 8px',
               paddingLeft: `${paddingLeft + 18}px`
             }}>
-              <span style={{ marginRight: '6px' }}>
-                <FileIcon 
-                  filename={inlineCreate.type === 'folder' ? 'folder' : 'newfile'} 
-                  isFolder={inlineCreate.type === 'folder'} 
-                  size={16} 
-                />
-              </span>
+              {inlineCreate.type === 'file' && (
+                <span style={{ marginRight: '6px' }}>
+                  <FileIcon filename={inlineValue || 'newfile'} size={18} />
+                </span>
+              )}
               <input
                 ref={inlineInputRef}
                 type="text"
@@ -337,7 +334,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
                   border: '1px solid #007acc',
                   borderRadius: '2px',
                   padding: '1px 4px',
-                  color: '#ececec',
+                  color: theme.text,
                   fontSize: '0.82rem',
                   outline: 'none'
                 }}
@@ -359,10 +356,10 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           display: 'flex',
           alignItems: 'center',
           padding: '3px 8px',
-          paddingLeft: `${paddingLeft + 18}px`,
+          paddingLeft: `${paddingLeft}px`,
           cursor: 'pointer',
           background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-          color: '#ececec',
+          color: theme.text,
           fontSize: '0.82rem',
           userSelect: 'none',
           transition: 'background 0.1s'
@@ -374,8 +371,8 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           if (!isSelected) e.currentTarget.style.background = 'transparent';
         }}
       >
-        <span style={{ marginRight: '6px' }}>
-          <FileIcon filename={item.name} size={16} />
+        <span style={{ marginRight: '6px', display: 'flex', alignItems: 'center' }}>
+          <FileIcon filename={item.name} size={18} />
         </span>
         {/* Inline rename for file */}
         {inlineRename?.path === item.path ? (
@@ -395,7 +392,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               border: '1px solid #007acc',
               borderRadius: '2px',
               padding: '1px 4px',
-              color: '#ececec',
+              color: theme.text,
               fontSize: '0.82rem',
               outline: 'none'
             }}
@@ -462,7 +459,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           paddingLeft: '12px',
           cursor: 'pointer',
           background: selectedPath === rootPath ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-          color: '#ececec',
+          color: theme.text,
           fontSize: '0.82rem',
           fontWeight: '600',
           userSelect: 'none'
@@ -473,9 +470,6 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           style={{ display: 'flex', alignItems: 'center', marginRight: '4px', color: '#888' }}
         >
           {expandedFolders.has(rootPath) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
-        <span style={{ marginRight: '6px' }}>
-          <FileIcon filename={rootName} isFolder={true} isOpen={expandedFolders.has(rootPath)} size={16} />
         </span>
         <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>{rootName}</span>
       </div>
@@ -488,13 +482,11 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
           padding: '3px 8px',
           paddingLeft: '30px'
         }}>
-          <span style={{ marginRight: '6px' }}>
-            <FileIcon 
-              filename={inlineCreate.type === 'folder' ? 'folder' : 'newfile'} 
-              isFolder={inlineCreate.type === 'folder'} 
-              size={16} 
-            />
-          </span>
+          {inlineCreate.type === 'file' && (
+            <span style={{ marginRight: '6px' }}>
+              <FileIcon filename={inlineValue || 'newfile'} size={18} />
+            </span>
+          )}
           <input
             ref={inlineInputRef}
             type="text"
@@ -512,7 +504,7 @@ const FileExplorer = forwardRef(({ rootPath, onFileSelect, onFileOpen, onPreview
               border: '1px solid #007acc',
               borderRadius: '2px',
               padding: '1px 4px',
-              color: '#ececec',
+              color: theme.text,
               fontSize: '0.82rem',
               outline: 'none',
               maxWidth: '200px'

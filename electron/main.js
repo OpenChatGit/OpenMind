@@ -8,6 +8,7 @@ const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, g
 const { initBrowser, closeBrowser, getDeepSearchTools, executeToolCall } = require('./deepSearch');
 const { initMcpHandler, getTools, getEnabledTools, getOllamaToolDefinitions, toggleTool, refreshTools, executeTool, openToolsFolder } = require('./mcpHandler');
 const imageGen = require('./imageGen');
+const { analyzeFile, analyzeWorkspace } = require('./codeAnalyzer');
 
 // Helper function to extract <think> tags from content (for models like Qwen3 that output thinking in content)
 function extractThinkTags(content) {
@@ -1540,7 +1541,289 @@ ipcMain.handle('ide-search-files', async (event, { rootPath, query, options = {}
     }
 });
 
+// Terminal Process Management using node-pty for real PTY support
+const terminalProcesses = new Map();
+let terminalIdCounter = 0;
+let pty = null;
+
+// Try to load node-pty (using prebuilt multiarch version)
+try {
+    pty = require('@homebridge/node-pty-prebuilt-multiarch');
+    console.log('node-pty loaded successfully (prebuilt-multiarch)');
+} catch (err) {
+    console.warn('node-pty not available, falling back to spawn:', err.message);
+}
+
+ipcMain.handle('terminal-create', async (event, { cwd }) => {
+    const os = require('os');
+    
+    console.log('Creating terminal with cwd:', cwd);
+    
+    const terminalId = ++terminalIdCounter;
+    const isWindows = process.platform === 'win32';
+    
+    const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
+    const workingDir = cwd || os.homedir();
+    
+    // Verify the directory exists
+    const fs = require('fs');
+    if (!fs.existsSync(workingDir)) {
+        console.error('Terminal cwd does not exist:', workingDir);
+        return { success: false, error: 'Directory does not exist' };
+    }
+    
+    try {
+        let terminalProcess;
+        
+        if (pty) {
+            // Use node-pty for real PTY support (like VS Code)
+            const shellArgs = isWindows ? ['-NoLogo'] : [];
+            
+            // Build environment - inherit all system env vars
+            // Force English output for consistent terminal experience
+            const termEnv = Object.assign({}, process.env, {
+                TERM: 'xterm-256color',
+                COLORTERM: 'truecolor',
+                TERM_PROGRAM: 'OpenMind',
+                TERM_PROGRAM_VERSION: '1.0.0',
+                // Force English locale
+                LANG: 'en_US.UTF-8',
+                LC_ALL: 'C',
+                // PowerShell/Windows specific - force English output
+                DOTNET_CLI_UI_LANGUAGE: 'en',
+                VSLANG: '1033', // English locale ID
+                PreferredUILang: 'en-US',
+                POWERSHELL_TELEMETRY_OPTOUT: '1'
+            });
+            
+            terminalProcess = pty.spawn(shell, shellArgs, {
+                name: 'xterm-256color',
+                cols: 80,
+                rows: 24,
+                cwd: workingDir,
+                env: termEnv,
+                useConpty: isWindows,
+                conptyInheritCursor: false
+            });
+            
+            // Handle PTY data
+            terminalProcess.onData((data) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('terminal-output', { 
+                        terminalId, 
+                        data: data,
+                        type: 'stdout'
+                    });
+                }
+            });
+            
+            terminalProcess.onExit(({ exitCode }) => {
+                console.log('PTY exited with code:', exitCode);
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('terminal-exit', { terminalId, code: exitCode });
+                }
+                terminalProcesses.delete(terminalId);
+            });
+            
+            terminalProcesses.set(terminalId, {
+                process: terminalProcess,
+                cwd: workingDir,
+                shell: isWindows ? 'powershell' : 'bash',
+                isPty: true
+            });
+        } else {
+            // Fallback to spawn if node-pty is not available
+            const { spawn } = require('child_process');
+            const shellArgs = isWindows ? ['-NoLogo'] : ['-i'];
+            
+            // Build environment - inherit all system env vars
+            // Force English output
+            const termEnv = Object.assign({}, process.env, {
+                TERM: 'xterm-256color',
+                COLORTERM: 'truecolor',
+                TERM_PROGRAM: 'OpenMind',
+                LANG: 'en_US.UTF-8',
+                LC_ALL: 'en_US.UTF-8'
+            });
+            
+            terminalProcess = spawn(shell, shellArgs, {
+                cwd: workingDir,
+                env: termEnv,
+                shell: false,
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+            
+            terminalProcess.stdout.on('data', (data) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('terminal-output', { 
+                        terminalId, 
+                        data: data.toString(),
+                        type: 'stdout'
+                    });
+                }
+            });
+            
+            terminalProcess.stderr.on('data', (data) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('terminal-output', { 
+                        terminalId, 
+                        data: data.toString(),
+                        type: 'stderr'
+                    });
+                }
+            });
+            
+            terminalProcess.on('close', (code) => {
+                console.log('Terminal closed with code:', code);
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('terminal-exit', { terminalId, code });
+                }
+                terminalProcesses.delete(terminalId);
+            });
+            
+            terminalProcesses.set(terminalId, {
+                process: terminalProcess,
+                cwd: workingDir,
+                shell: isWindows ? 'powershell' : 'bash',
+                isPty: false
+            });
+        }
+        
+        console.log('Terminal created successfully:', terminalId, 'PTY:', !!pty);
+        
+        return { 
+            success: true, 
+            terminalId,
+            shell: isWindows ? 'powershell' : 'bash',
+            cwd: workingDir,
+            isPty: !!pty
+        };
+    } catch (error) {
+        console.error('Failed to create terminal:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('terminal-write', async (event, { terminalId, data }) => {
+    const terminal = terminalProcesses.get(terminalId);
+    if (!terminal) {
+        return { success: false, error: 'Terminal not found' };
+    }
+    
+    try {
+        if (terminal.isPty) {
+            // node-pty uses write() directly
+            terminal.process.write(data);
+        } else {
+            // spawn uses stdin.write()
+            terminal.process.stdin.write(data);
+        }
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('terminal-resize', async (event, { terminalId, cols, rows }) => {
+    const terminal = terminalProcesses.get(terminalId);
+    if (!terminal) {
+        return { success: false, error: 'Terminal not found' };
+    }
+    
+    try {
+        if (terminal.isPty && terminal.process.resize) {
+            terminal.process.resize(cols, rows);
+        }
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('terminal-kill', async (event, { terminalId }) => {
+    const terminal = terminalProcesses.get(terminalId);
+    if (!terminal) {
+        return { success: false, error: 'Terminal not found' };
+    }
+    
+    try {
+        if (terminal.isPty) {
+            terminal.process.kill();
+        } else {
+            terminal.process.kill();
+        }
+        terminalProcesses.delete(terminalId);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('terminal-list', async () => {
+    const terminals = [];
+    for (const [id, terminal] of terminalProcesses) {
+        terminals.push({
+            id,
+            cwd: terminal.cwd,
+            shell: terminal.shell
+        });
+    }
+    return { success: true, terminals };
+});
+
+// Run a single command and return output (for simple execution)
+ipcMain.handle('terminal-run-command', async (event, { command, cwd }) => {
+    const { exec } = require('child_process');
+    const os = require('os');
+    
+    return new Promise((resolve) => {
+        exec(command, { 
+            cwd: cwd || os.homedir(),
+            maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+            timeout: 60000 // 60 second timeout
+        }, (error, stdout, stderr) => {
+            resolve({
+                success: !error,
+                output: stdout,
+                error: stderr || (error ? error.message : null),
+                code: error ? error.code : 0
+            });
+        });
+    });
+});
+
+// Code Analysis IPC Handlers
+ipcMain.handle('analyze-code', async (event, { filePath, content }) => {
+    try {
+        const result = analyzeFile(filePath, content);
+        return { success: true, problems: result };
+    } catch (error) {
+        console.error('Code analysis error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('analyze-workspace', async (event, { rootPath }) => {
+    try {
+        const result = await analyzeWorkspace(rootPath);
+        return { success: true, problems: result };
+    } catch (error) {
+        console.error('Workspace analysis error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
 app.on('window-all-closed', async () => {
+    // Kill all terminal processes
+    for (const [id, terminal] of terminalProcesses) {
+        try {
+            terminal.process.kill();
+        } catch (e) {
+            // Ignore
+        }
+    }
+    terminalProcesses.clear();
+    
     // Close DeepSearch browser
     await closeBrowser();
     

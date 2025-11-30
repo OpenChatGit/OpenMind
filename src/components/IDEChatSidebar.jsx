@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowUp, MessageSquare, ChevronDown } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 
 const IDEChatSidebar = ({ inferenceSettings, onClose }) => {
+  const { theme, isDark } = useTheme();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -129,12 +131,14 @@ const IDEChatSidebar = ({ inferenceSettings, onClose }) => {
       ref={sidebarRef}
       style={{
         width: `${width}px`,
+        minWidth: '280px',
+        flexShrink: 0,
         height: '100%',
-        background: '#1b1b1c',
-        borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+        background: theme.bgSecondary,
+        borderLeft: `1px solid ${theme.border}`,
         display: 'flex',
         flexDirection: 'column',
-        position: 'relative'
+        transition: 'background 0.3s'
       }}
     >
       {/* Resize Handle */}

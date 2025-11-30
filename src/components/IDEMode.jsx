@@ -1,13 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Code2, X, FilePlus, FolderPlus, RefreshCw, ChevronsDownUp, MoreHorizontal, Play, File, FolderOpen, Plus, Folder, Eye } from 'lucide-react';
 import FileExplorer from './FileExplorer';
+import { useTheme } from '../contexts/ThemeContext';
 import CodeEditor from './CodeEditor';
 import MarkdownPreview from './MarkdownPreview';
 import FileIcon from './FileIcon';
+import ExtensionsPanel from './ExtensionsPanel';
+import TerminalPanel from './TerminalPanel';
 import { getHighlightParts } from '../utils/searchUtils';
 
-const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
+const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusChange }, ref) => {
+  const { theme, isDark } = useTheme();
   const fileExplorerRef = useRef(null);
+  const codeEditorRef = useRef(null);
+  const analysisTimerRef = useRef(null);
+  const lastDiagnosticsRef = useRef(new Map()); // Track diagnostics per file
   const [sidePanelWidth, setSidePanelWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const [openTabs, setOpenTabs] = useState([]);
@@ -35,6 +42,21 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
   });
   const [gitInfo, setGitInfo] = useState({ isRepo: false, branch: '' });
   const [editorHighlight, setEditorHighlight] = useState(null); // { query, line }
+  const [wordWrap, setWordWrap] = useState(() => {
+    return localStorage.getItem('ide-word-wrap') === 'true';
+  });
+  const [editorTheme, setEditorTheme] = useState(() => {
+    return localStorage.getItem('ide-editor-theme') || 'dark-plus';
+  });
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [isTerminalMaximized, setIsTerminalMaximized] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
+  
+  // Panel data states
+  const [problems, setProblems] = useState([]);
+  const [outputLogs, setOutputLogs] = useState([]);
+  const [debugLogs, setDebugLogs] = useState([]);
+  const [forwardedPorts, setForwardedPorts] = useState([]);
 
   // Memoize callbacks to prevent recreation
   const checkGitStatus = useCallback(async (folder) => {
@@ -66,6 +88,40 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
       setGitInfo({ isRepo: false, branch: '' });
     }
   }, [workspaceFolder, checkGitStatus]);
+
+  // Report status changes to parent
+  useEffect(() => {
+    if (onStatusChange) {
+      const activeFile = openTabs.find(t => t.id === activeTab);
+      const errorCount = problems.filter(p => p.severity === 'error').length;
+      const warningCount = problems.filter(p => p.severity === 'warning').length;
+      
+      // Get language from filename
+      const getLanguageName = (filename) => {
+        const ext = filename?.split('.').pop()?.toLowerCase();
+        const langMap = {
+          js: 'JavaScript', jsx: 'JavaScript JSX', ts: 'TypeScript', tsx: 'TypeScript JSX',
+          py: 'Python', java: 'Java', c: 'C', cpp: 'C++', cs: 'C#',
+          html: 'HTML', css: 'CSS', scss: 'SCSS', json: 'JSON', md: 'Markdown',
+          xml: 'XML', yaml: 'YAML', yml: 'YAML', sql: 'SQL', sh: 'Shell Script',
+          ps1: 'PowerShell', dockerfile: 'Dockerfile', vue: 'Vue', svelte: 'Svelte'
+        };
+        return langMap[ext] || 'Plain Text';
+      };
+      
+      onStatusChange({
+        line: cursorPosition.line,
+        column: cursorPosition.column,
+        language: activeFile ? getLanguageName(activeFile.name) : '',
+        encoding: 'UTF-8',
+        lineEnding: 'CRLF',
+        indentation: 'Spaces: 2',
+        gitBranch: gitInfo.branch || 'main',
+        errorCount,
+        warningCount
+      });
+    }
+  }, [cursorPosition, activeTab, openTabs, problems, gitInfo, onStatusChange]);
 
   // Open folder dialog
   const handleOpenFolder = async () => {
@@ -105,6 +161,58 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
     }
   };
 
+  // Handle Monaco diagnostics - stable callback that checks for changes
+  const handleMonacoDiagnostics = useCallback((filePath, fileName, diagnostics) => {
+    // Create a signature to compare
+    const signature = JSON.stringify(diagnostics.map(d => ({
+      l: d.line, c: d.column, m: d.message, s: d.severity
+    })));
+    
+    // Check if diagnostics actually changed
+    const lastSignature = lastDiagnosticsRef.current.get(filePath);
+    if (lastSignature === signature) return; // No change
+    
+    lastDiagnosticsRef.current.set(filePath, signature);
+    
+    // Update problems state
+    setProblems(prev => {
+      const filtered = prev.filter(p => p.file !== filePath || p.source !== 'Monaco');
+      const newProblems = diagnostics.map(d => ({
+        ...d,
+        file: filePath,
+        fileName: fileName,
+        source: 'Monaco'
+      }));
+      return [...filtered, ...newProblems];
+    });
+  }, []);
+
+  // Analyze code for problems (backend analyzer)
+  const analyzeCode = useCallback(async (filePath, content) => {
+    if (!filePath || !content) return;
+    
+    try {
+      const result = await window.electronAPI?.analyzeCode?.(filePath, content);
+      if (result?.success && result.problems) {
+        // Update problems for this file
+        setProblems(prev => {
+          // Remove old problems for this file (not Monaco ones)
+          const filtered = prev.filter(p => p.file !== filePath || p.source === 'Monaco');
+          // Add new problems
+          const newProblems = result.problems.map(p => ({
+            ...p,
+            file: filePath,
+            fileName: filePath.split(/[/\\]/).pop(),
+            source: 'Analyzer'
+          }));
+          return [...filtered, ...newProblems];
+        });
+      }
+    } catch (err) {
+      // Silently ignore - backend might not be ready
+    }
+  }, []);
+
   const handleFileOpen = async (item, asPreview = false) => {
     if (item.isDirectory) return;
     
@@ -131,6 +239,11 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
       setOpenTabs(prev => [...prev, newTab]);
       setFileContents(prev => ({ ...prev, [tabId]: result.content }));
       setActiveTab(tabId);
+      
+      // Analyze code on file open (if not preview)
+      if (!asPreview && !isMarkdown) {
+        setTimeout(() => analyzeCode(item.path, result.content), 100);
+      }
     }
   };
 
@@ -146,7 +259,15 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
     setOpenTabs(prev => prev.map(tab => 
       tab.path === filePath ? { ...tab, modified: true } : tab
     ));
-  }, []);
+    
+    // Debounced code analysis
+    if (analysisTimerRef.current) {
+      clearTimeout(analysisTimerRef.current);
+    }
+    analysisTimerRef.current = setTimeout(() => {
+      analyzeCode(filePath, newContent);
+    }, 500); // 500ms debounce
+  }, [analyzeCode]);
 
   // Save file - memoized
   const handleSaveFile = useCallback(async (filePath) => {
@@ -220,28 +341,173 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
     }
   }, [activeTab, handleCloseTab]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Ctrl+S to save
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSaveCurrentTab();
+  // Editor action handler - delegates to CodeEditor ref
+  const editorAction = useCallback((action) => {
+    const editor = codeEditorRef.current;
+    if (!editor) return;
+    
+    switch (action) {
+      case 'undo':
+        editor.undo();
+        break;
+      case 'redo':
+        editor.redo();
+        break;
+      case 'cut':
+        editor.cut();
+        break;
+      case 'copy':
+        editor.copy();
+        break;
+      case 'paste':
+        editor.paste();
+        break;
+      case 'selectAll':
+        editor.selectAll();
+        break;
+      case 'copyLineUp':
+        editor.copyLineUp();
+        break;
+      case 'copyLineDown':
+        editor.copyLineDown();
+        break;
+      case 'moveLineUp':
+        editor.moveLineUp();
+        break;
+      case 'moveLineDown':
+        editor.moveLineDown();
+        break;
+      case 'duplicateSelection':
+        editor.duplicateSelection();
+        break;
+      case 'toggleLineComment':
+        editor.toggleLineComment();
+        break;
+      case 'toggleBlockComment':
+        editor.toggleBlockComment();
+        break;
+      default:
+        console.log('Unknown editor action:', action);
+    }
+  }, []);
+
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    newFile: () => {
+      fileExplorerRef.current?.startNewFile();
+    },
+    openFile: async () => {
+      const result = await window.electronAPI?.ideSelectFile?.();
+      if (result?.success && result.filePath) {
+        const fileName = result.filePath.split(/[/\\]/).pop();
+        handleFileOpen({ path: result.filePath, name: fileName, isDirectory: false });
       }
-      // Ctrl+W to close tab
-      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
-        e.preventDefault();
-        handleCloseCurrentTab();
+    },
+    openFolder: handleOpenFolder,
+    saveCurrentFile: handleSaveCurrentTab,
+    saveFileAs: async () => {
+      if (activeTab && fileContents[activeTab] !== undefined) {
+        const result = await window.electronAPI?.ideSaveFileAs?.(activeTab, fileContents[activeTab]);
+        if (result?.success) {
+          const newPath = result.filePath;
+          const newName = newPath.split(/[/\\]/).pop();
+          setOpenTabs(prev => prev.map(tab => 
+            tab.id === activeTab ? { ...tab, id: newPath, path: newPath, name: newName, modified: false } : tab
+          ));
+          setFileContents(prev => {
+            const newContents = { ...prev };
+            if (activeTab !== newPath) {
+              newContents[newPath] = newContents[activeTab];
+              delete newContents[activeTab];
+            }
+            return newContents;
+          });
+          setActiveTab(newPath);
+        }
       }
-      // Ctrl+P for quick file search (future feature)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-        e.preventDefault();
-        // TODO: Quick file picker
+    },
+    saveAllFiles: () => {
+      openTabs.forEach(tab => {
+        if (tab.modified && tab.path) {
+          handleSaveFile(tab.path);
+        }
+      });
+    },
+    revertFile: async () => {
+      if (activeTab && !activeTab.startsWith('preview:')) {
+        const result = await window.electronAPI?.ideReadFile(activeTab);
+        if (result?.success) {
+          setFileContents(prev => ({ ...prev, [activeTab]: result.content }));
+          setOpenTabs(prev => prev.map(tab => 
+            tab.id === activeTab ? { ...tab, modified: false } : tab
+          ));
+        }
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSaveCurrentTab, handleCloseCurrentTab]);
+    },
+    closeCurrentTab: handleCloseCurrentTab,
+    closeFolder: () => {
+      setWorkspaceFolder(null);
+      setOpenTabs([]);
+      setActiveTab(null);
+      setFileContents({});
+      setExplorerKey(prev => prev + 1);
+    },
+    editorAction,
+    toggleWordWrap: () => {
+      setWordWrap(prev => {
+        const newValue = !prev;
+        localStorage.setItem('ide-word-wrap', newValue.toString());
+        return newValue;
+      });
+    },
+    setTheme: (theme) => {
+      setEditorTheme(theme);
+      localStorage.setItem('ide-editor-theme', theme);
+    },
+    openTerminal: () => {
+      setShowTerminal(true);
+    },
+    runActiveFile: async () => {
+      if (!activeTab || !workspaceFolder) return;
+      const tab = openTabs.find(t => t.id === activeTab);
+      if (!tab?.path) return;
+      
+      // Determine how to run based on file extension
+      const ext = tab.name.split('.').pop()?.toLowerCase();
+      let command = '';
+      
+      if (ext === 'js' || ext === 'mjs') command = `node "${tab.path}"`;
+      else if (ext === 'ts') command = `npx ts-node "${tab.path}"`;
+      else if (ext === 'py') command = `python "${tab.path}"`;
+      else if (ext === 'sh') command = `bash "${tab.path}"`;
+      else if (ext === 'ps1') command = `powershell -File "${tab.path}"`;
+      else {
+        alert(`Don't know how to run .${ext} files`);
+        return;
+      }
+      
+      setShowTerminal(true);
+      // Log to output
+      const timestamp = new Date().toLocaleTimeString();
+      setOutputLogs(prev => [...prev, { timestamp, message: `> Running: ${command}`, type: 'info' }]);
+    },
+    // Methods to add logs from external sources
+    addOutputLog: (message, type = 'info') => {
+      const timestamp = new Date().toLocaleTimeString();
+      setOutputLogs(prev => [...prev, { timestamp, message, type }]);
+    },
+    addDebugLog: (message, type = 'log') => {
+      setDebugLogs(prev => [...prev, { message, type }]);
+    },
+    addProblem: (problem) => {
+      setProblems(prev => [...prev, problem]);
+    },
+    clearProblems: () => setProblems([]),
+    clearOutput: () => setOutputLogs([]),
+    clearDebug: () => setDebugLogs([])
+  }), [activeTab, fileContents, openTabs, workspaceFolder, handleOpenFolder, handleSaveCurrentTab, handleCloseCurrentTab, handleSaveFile, editorAction]);
+
+  // Note: Keyboard shortcuts are handled in App.jsx for global IDE shortcuts
 
   const handleNewFile = async () => {
     if (!workspaceFolder) {
@@ -576,12 +842,108 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
         
         return (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <PanelHeader 
-              title="Search" 
-              buttons={[
-                { icon: RefreshCw, title: 'Clear', onClick: () => { setSearchResults([]); setGroupedResults({}); setSearchQuery(''); } },
-              ]}
-            />
+            {/* Search Header with VS Code style buttons */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+            }}>
+              <span style={{ 
+                fontSize: '0.7rem', 
+                color: '#888', 
+                textTransform: 'uppercase',
+                fontWeight: '600',
+                letterSpacing: '0.5px'
+              }}>
+                Search
+              </span>
+              <div style={{ display: 'flex', gap: '2px' }}>
+                {/* Refresh Search */}
+                <button
+                  onClick={() => searchQuery && handleSearch()}
+                  title="Refresh"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; e.currentTarget.style.color = '#ececec'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#888'; }}
+                >
+                  <RefreshCw size={14} />
+                </button>
+                {/* Clear Search */}
+                <button
+                  onClick={() => { setSearchResults([]); setGroupedResults({}); setSearchQuery(''); setReplaceQuery(''); }}
+                  title="Clear Search Results"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; e.currentTarget.style.color = '#ececec'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#888'; }}
+                >
+                  <X size={14} />
+                </button>
+                {/* Collapse All */}
+                <button
+                  onClick={() => setExpandedFiles(new Set())}
+                  title="Collapse All"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; e.currentTarget.style.color = '#ececec'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#888'; }}
+                >
+                  <ChevronsDownUp size={14} />
+                </button>
+                {/* Expand All */}
+                <button
+                  onClick={() => setExpandedFiles(new Set(Object.keys(groupedResults)))}
+                  title="Expand All"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; e.currentTarget.style.color = '#ececec'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#888'; }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M9 9H4v1h5V9zM9 4v1H4V4h5zm0 3H4v1h5V7zm2-3v1h3V4h-3zm0 3v1h3V7h-3zm0 3v1h3v-1h-3z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
             
             {/* Search Input Area */}
             <div style={{ padding: '8px 12px' }}>
@@ -592,7 +954,8 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                 background: '#3c3c3c',
                 border: '1px solid #3c3c3c',
                 borderRadius: '4px',
-                marginBottom: '6px'
+                marginBottom: '6px',
+                minWidth: 0
               }}>
                 <input
                   type="text"
@@ -602,6 +965,7 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   style={{
                     flex: 1,
+                    minWidth: 0,
                     background: 'transparent',
                     border: 'none',
                     padding: '6px 8px',
@@ -610,48 +974,51 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                     outline: 'none'
                   }}
                 />
-                {/* Search Options */}
-                <div style={{ display: 'flex', gap: '2px', padding: '0 4px' }}>
+                {/* Search Options - flexShrink: 0 to prevent shrinking */}
+                <div style={{ display: 'flex', gap: '1px', padding: '0 2px', flexShrink: 0 }}>
                   <button
                     onClick={() => setSearchOptions(prev => ({ ...prev, caseSensitive: !prev.caseSensitive }))}
-                    title="Match Case"
+                    title="Match Case (Alt+C)"
                     style={{
                       background: searchOptions.caseSensitive ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
                       border: 'none',
                       color: searchOptions.caseSensitive ? '#ececec' : '#888',
                       cursor: 'pointer',
-                      padding: '4px 6px',
+                      padding: '4px 5px',
                       borderRadius: '3px',
-                      fontSize: '0.75rem',
-                      fontWeight: 'bold'
+                      fontSize: '0.7rem',
+                      fontWeight: 'bold',
+                      minWidth: '24px'
                     }}
                   >Aa</button>
                   <button
                     onClick={() => setSearchOptions(prev => ({ ...prev, wholeWord: !prev.wholeWord }))}
-                    title="Match Whole Word"
+                    title="Match Whole Word (Alt+W)"
                     style={{
                       background: searchOptions.wholeWord ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
                       border: 'none',
                       color: searchOptions.wholeWord ? '#ececec' : '#888',
                       cursor: 'pointer',
-                      padding: '4px 6px',
+                      padding: '4px 5px',
                       borderRadius: '3px',
-                      fontSize: '0.7rem',
+                      fontSize: '0.65rem',
                       fontWeight: 'bold',
-                      textDecoration: 'underline'
+                      textDecoration: 'underline',
+                      minWidth: '24px'
                     }}
                   >ab</button>
                   <button
                     onClick={() => setSearchOptions(prev => ({ ...prev, useRegex: !prev.useRegex }))}
-                    title="Use Regular Expression"
+                    title="Use Regular Expression (Alt+R)"
                     style={{
                       background: searchOptions.useRegex ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
                       border: 'none',
                       color: searchOptions.useRegex ? '#ececec' : '#888',
                       cursor: 'pointer',
-                      padding: '4px 6px',
+                      padding: '4px 5px',
                       borderRadius: '3px',
-                      fontSize: '0.7rem'
+                      fontSize: '0.65rem',
+                      minWidth: '24px'
                     }}
                   >.*</button>
                 </div>
@@ -663,7 +1030,8 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                 alignItems: 'center',
                 background: '#3c3c3c',
                 border: '1px solid #3c3c3c',
-                borderRadius: '4px'
+                borderRadius: '4px',
+                minWidth: 0
               }}>
                 <input
                   type="text"
@@ -672,6 +1040,7 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                   onChange={(e) => setReplaceQuery(e.target.value)}
                   style={{
                     flex: 1,
+                    minWidth: 0,
                     background: 'transparent',
                     border: 'none',
                     padding: '6px 8px',
@@ -680,6 +1049,98 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                     outline: 'none'
                   }}
                 />
+                {/* Replace Buttons */}
+                <div style={{ display: 'flex', gap: '1px', padding: '0 2px', flexShrink: 0 }}>
+                  <button
+                    onClick={async () => {
+                      // Replace in current selection/file
+                      if (activeTab && searchQuery && replaceQuery !== undefined) {
+                        const content = fileContents[activeTab];
+                        if (content) {
+                          let newContent;
+                          if (searchOptions.useRegex) {
+                            const flags = searchOptions.caseSensitive ? 'g' : 'gi';
+                            newContent = content.replace(new RegExp(searchQuery, flags), replaceQuery);
+                          } else {
+                            const regex = new RegExp(
+                              searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                              searchOptions.caseSensitive ? 'g' : 'gi'
+                            );
+                            newContent = content.replace(regex, replaceQuery);
+                          }
+                          handleCodeChange(activeTab, newContent);
+                        }
+                      }
+                    }}
+                    title="Replace (Ctrl+Shift+1)"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#888',
+                      cursor: 'pointer',
+                      padding: '4px 5px',
+                      borderRadius: '3px',
+                      fontSize: '0.7rem',
+                      minWidth: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.5 3h5v1h-5v-1zm0 3h5v1h-5v-1zm0 3h5v1h-5v-1zm8.5-5.5l-2 2 2 2 .7-.7-1.3-1.3 1.3-1.3-.7-.7z"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      // Replace all in workspace
+                      if (searchQuery && replaceQuery !== undefined && searchResults.length > 0) {
+                        const filesToUpdate = [...new Set(searchResults.map(r => r.file))];
+                        for (const filePath of filesToUpdate) {
+                          const content = fileContents[filePath];
+                          if (content) {
+                            let newContent;
+                            if (searchOptions.useRegex) {
+                              const flags = searchOptions.caseSensitive ? 'g' : 'gi';
+                              newContent = content.replace(new RegExp(searchQuery, flags), replaceQuery);
+                            } else {
+                              const regex = new RegExp(
+                                searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                                searchOptions.caseSensitive ? 'g' : 'gi'
+                              );
+                              newContent = content.replace(regex, replaceQuery);
+                            }
+                            handleCodeChange(filePath, newContent);
+                          }
+                        }
+                        // Re-run search to update results
+                        handleSearch();
+                      }
+                    }}
+                    title="Replace All (Ctrl+Alt+Enter)"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#888',
+                      cursor: 'pointer',
+                      padding: '4px 5px',
+                      borderRadius: '3px',
+                      fontSize: '0.7rem',
+                      minWidth: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M11.5 3.5l-2 2 2 2 .7-.7-1.3-1.3 1.3-1.3-.7-.7zM3.5 3h5v1h-5v-1zm0 3h5v1h-5v-1zm0 3h5v1h-5v-1zm0 3h9v1h-9v-1z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
               
               {!workspaceFolder && (
@@ -870,9 +1331,13 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                 { icon: MoreHorizontal, title: 'More Actions', onClick: () => console.log('More') },
               ]}
             />
-            <div style={{ padding: '12px', color: '#666', fontSize: '0.85rem' }}>
-              No extensions installed
-            </div>
+            <ExtensionsPanel 
+              currentTheme={editorTheme}
+              onThemeChange={(theme) => {
+                setEditorTheme(theme);
+                localStorage.setItem('ide-editor-theme', theme);
+              }}
+            />
           </div>
         );
       default:
@@ -883,19 +1348,23 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
   return (
     <div style={{
       flex: 1,
+      minWidth: 0,
       display: 'flex',
-      background: '#151517',
-      height: '100%'
+      background: theme.bg,
+      height: '100%',
+      overflow: 'hidden',
+      transition: 'background 0.3s'
     }}>
       {/* Side Panel */}
       {isSidePanelVisible && (
       <div style={{
         width: `${sidePanelWidth}px`,
-        background: '#1b1b1c',
-        borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+        background: theme.bgSecondary,
+        borderRight: `1px solid ${theme.border}`,
         overflowY: 'auto',
         position: 'relative',
-        flexShrink: 0
+        flexShrink: 0,
+        transition: 'background 0.3s'
       }}>
         {getPanelContent()}
         
@@ -933,8 +1402,8 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
         {/* Tab Bar */}
         <div style={{
           height: '35px',
-          background: '#1b1b1c',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          background: theme.bgSecondary,
+          borderBottom: `1px solid ${theme.border}`,
           display: 'flex',
           alignItems: 'stretch',
           overflowX: 'auto'
@@ -952,11 +1421,11 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
                 onMouseLeave={() => setHoveredTab(null)}
                 style={{
                   padding: '0 12px',
-                  background: isActive ? '#151517' : 'transparent',
+                  background: isActive ? theme.bg : 'transparent',
                   borderTop: isActive ? '1px solid #6366f1' : '1px solid transparent',
-                  borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+                  borderRight: `1px solid ${theme.borderLight}`,
                   fontSize: '0.8rem',
-                  color: isActive ? '#ececec' : '#888',
+                  color: isActive ? theme.text : theme.textSecondary,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
@@ -1198,14 +1667,50 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
             />
           ) : (
             <CodeEditor
+              ref={codeEditorRef}
               content={fileContents[activeTab] || ''}
               filename={openTabs.find(t => t.id === activeTab)?.name || ''}
               onChange={(newContent) => handleCodeChange(activeTab, newContent)}
               highlight={editorHighlight}
               onHighlightClear={() => setEditorHighlight(null)}
+              wordWrap={wordWrap}
+              theme={editorTheme}
+              onMonacoDiagnostics={(diagnostics) => {
+                const tab = openTabs.find(t => t.id === activeTab);
+                if (tab) {
+                  handleMonacoDiagnostics(activeTab, tab.name, diagnostics);
+                }
+              }}
+              onCursorChange={setCursorPosition}
             />
           )}
         </div>
+        
+        {/* Terminal Panel */}
+        <TerminalPanel
+          isOpen={showTerminal}
+          onClose={() => setShowTerminal(false)}
+          workspaceFolder={workspaceFolder}
+          onMaximize={() => setIsTerminalMaximized(!isTerminalMaximized)}
+          isMaximized={isTerminalMaximized}
+          problems={problems}
+          outputLogs={outputLogs}
+          debugLogs={debugLogs}
+          forwardedPorts={forwardedPorts}
+          onClearOutput={() => setOutputLogs([])}
+          onClearDebug={() => setDebugLogs([])}
+          onPortForward={() => {
+            const port = prompt('Enter port number to forward:');
+            if (port && !isNaN(port)) {
+              setForwardedPorts(prev => [...prev, { 
+                port: parseInt(port), 
+                url: `http://localhost:${port}`,
+                visibility: 'Private'
+              }]);
+            }
+          }}
+          onPortClose={(port) => setForwardedPorts(prev => prev.filter(p => p.port !== port))}
+        />
       </div>
 
       {/* Unsaved Changes Warning */}
@@ -1278,6 +1783,8 @@ const IDEMode = ({ activePanel, isSidePanelVisible = true }) => {
       )}
     </div>
   );
-};
+});
+
+IDEMode.displayName = 'IDEMode';
 
 export default IDEMode;

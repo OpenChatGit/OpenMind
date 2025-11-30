@@ -4,8 +4,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import ChartRenderer from './ChartRenderer';
+import { useTheme } from '../contexts/ThemeContext';
 
 const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, inferenceSettings }) => {
+  const { theme, isDark } = useTheme();
   const [input, setInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [availableModels, setAvailableModels] = useState([]);
@@ -687,14 +689,14 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     }}>
       <div style={{
         width: '100%',
-        background: '#2c2c2e',
+        background: theme.bgSecondary,
         borderRadius: '20px',
         padding: '16px',
-        boxShadow: '0 0 20px rgba(255, 255, 255, 0.05), 0 4px 6px rgba(0,0,0,0.1)',
+        boxShadow: isDark ? '0 0 20px rgba(255, 255, 255, 0.05), 0 4px 6px rgba(0,0,0,0.1)' : '0 4px 12px rgba(0,0,0,0.08)',
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
-        border: '1px solid rgba(255,255,255,0.08)'
+        border: `1px solid ${theme.border}`
       }}>
         {/* Attached Images Preview */}
         {attachedImages.length > 0 && (
@@ -764,7 +766,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             width: '100%',
             background: 'transparent',
             border: 'none',
-            color: 'white',
+            color: theme.text,
             resize: 'none',
             outline: 'none',
             fontFamily: 'inherit',
@@ -1632,7 +1634,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           <h1 style={{
             fontSize: '2rem',
             fontWeight: '600',
-            color: 'white',
+            color: theme.text,
             textAlign: 'center',
             opacity: 0.9
           }}>
@@ -1663,10 +1665,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                       maxWidth: '70%',
                       padding: '1rem 1.5rem',
                       borderRadius: '20px',
-                      background: 'transparent',
-                      border: '1px solid rgba(255,255,255,0.3)',
+                      background: theme.userMessageBg,
+                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
                       lineHeight: '1.5',
-                      color: 'white'
+                      color: theme.text
                     }}>
                       {/* Show attached images */}
                       {msg.images && msg.images.length > 0 && (

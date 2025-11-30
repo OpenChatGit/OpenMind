@@ -88,5 +88,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ideRenameFile: (oldPath, newPath) => ipcRenderer.invoke('ide-rename-file', { oldPath, newPath }),
     ideSearchFiles: (rootPath, query, options) => ipcRenderer.invoke('ide-search-files', { rootPath, query, options }),
     ideGetStats: (filePath) => ipcRenderer.invoke('ide-get-stats', filePath),
-    ideGitStatus: (rootPath) => ipcRenderer.invoke('ide-git-status', rootPath)
+    ideGitStatus: (rootPath) => ipcRenderer.invoke('ide-git-status', rootPath),
+    
+    // Code Analysis API
+    analyzeCode: (filePath, content) => ipcRenderer.invoke('analyze-code', { filePath, content }),
+    analyzeWorkspace: (rootPath) => ipcRenderer.invoke('analyze-workspace', { rootPath }),
+    
+    // Terminal API
+    terminalCreate: (cwd) => ipcRenderer.invoke('terminal-create', { cwd }),
+    terminalWrite: (terminalId, data) => ipcRenderer.invoke('terminal-write', { terminalId, data }),
+    terminalResize: (terminalId, cols, rows) => ipcRenderer.invoke('terminal-resize', { terminalId, cols, rows }),
+    terminalKill: (terminalId) => ipcRenderer.invoke('terminal-kill', { terminalId }),
+    terminalList: () => ipcRenderer.invoke('terminal-list'),
+    terminalRunCommand: (command, cwd) => ipcRenderer.invoke('terminal-run-command', { command, cwd }),
+    onTerminalOutput: (callback) => {
+        const handler = (event, data) => callback(data);
+        ipcRenderer.on('terminal-output', handler);
+        return () => ipcRenderer.removeListener('terminal-output', handler);
+    },
+    onTerminalExit: (callback) => {
+        const handler = (event, data) => callback(data);
+        ipcRenderer.on('terminal-exit', handler);
+        return () => ipcRenderer.removeListener('terminal-exit', handler);
+    }
 });

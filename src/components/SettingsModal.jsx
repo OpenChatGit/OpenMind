@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Settings, Cpu, Globe, ChevronRight, Check, Loader2 } from 'lucide-react';
+import { X, Settings, Cpu, Globe, ChevronRight, Check, Loader2, Sun, Moon } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 
 const TABS = [
   { id: 'general', name: 'General', icon: Settings },
@@ -31,6 +32,110 @@ const INFERENCE_PROVIDERS = [
     configFields: ['host', 'port']
   },
 ];
+
+const GeneralSettings = () => {
+  const { theme, themeName, setTheme, isDark } = useTheme();
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Theme Selection */}
+      <div>
+        <label style={{ 
+          display: 'block', 
+          color: '#aaa', 
+          fontSize: '0.85rem',
+          marginBottom: '12px',
+          fontWeight: '500'
+        }}>
+          Appearance
+        </label>
+        
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {/* Dark Mode */}
+          <div
+            onClick={() => setTheme('dark')}
+            style={{
+              flex: 1,
+              padding: '16px',
+              background: themeName === 'dark' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.03)',
+              border: themeName === 'dark' ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.2s'
+            }}
+          >
+            <div style={{
+              width: '100%',
+              height: '60px',
+              background: '#1e1e1e',
+              borderRadius: '8px',
+              marginBottom: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}>
+              <Moon size={24} color="#888" />
+            </div>
+            <div style={{ color: themeName === 'dark' ? '#fff' : '#888', fontWeight: '500', fontSize: '0.9rem' }}>
+              Dark
+            </div>
+            {themeName === 'dark' && (
+              <Check size={16} style={{ color: '#6366f1', marginTop: '8px' }} />
+            )}
+          </div>
+          
+          {/* Light Mode */}
+          <div
+            onClick={() => setTheme('light')}
+            style={{
+              flex: 1,
+              padding: '16px',
+              background: themeName === 'light' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.03)',
+              border: themeName === 'light' ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.2s'
+            }}
+          >
+            <div style={{
+              width: '100%',
+              height: '60px',
+              background: '#f5f5f5',
+              borderRadius: '8px',
+              marginBottom: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(0,0,0,0.1)'
+            }}>
+              <Sun size={24} color="#666" />
+            </div>
+            <div style={{ color: themeName === 'light' ? '#fff' : '#888', fontWeight: '500', fontSize: '0.9rem' }}>
+              Light
+            </div>
+            {themeName === 'light' && (
+              <Check size={16} style={{ color: '#6366f1', marginTop: '8px' }} />
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <div style={{ 
+        padding: '12px 16px', 
+        background: 'rgba(99, 102, 241, 0.1)', 
+        borderRadius: '8px',
+        border: '1px solid rgba(99, 102, 241, 0.2)'
+      }}>
+        <p style={{ color: '#a5b4fc', fontSize: '0.85rem', margin: 0 }}>
+          💡 Theme changes are applied immediately and saved automatically.
+        </p>
+      </div>
+    </div>
+  );
+};
 
 const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
   const [activeTab, setActiveTab] = useState('general');
@@ -218,11 +323,7 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
           {/* Tab Content */}
           <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
             {activeTab === 'general' && (
-              <div>
-                <p style={{ color: '#888', fontSize: '0.9rem' }}>
-                  General settings coming soon...
-                </p>
-              </div>
+              <GeneralSettings />
             )}
 
             {activeTab === 'inference' && (
