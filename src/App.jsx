@@ -63,6 +63,9 @@ const App = () => {
     errorCount: 0,
     warningCount: 0
   });
+  const [ideWorkspaceFolder, setIdeWorkspaceFolder] = useState(() => {
+    return localStorage.getItem('ide-workspace-folder') || null;
+  });
 
   // Save IDE state to localStorage - combined into single effect
   useEffect(() => {
@@ -519,6 +522,7 @@ const App = () => {
         showIDEChat={showIDEChat}
         onToggleIDEChat={() => setShowIDEChat(!showIDEChat)}
         onIDEAction={handleIDEAction}
+        projectPath={ideWorkspaceFolder}
       />
 
       <div style={{
@@ -551,6 +555,7 @@ const App = () => {
                 activePanel={ideActivePanel}
                 isSidePanelVisible={ideSidePanelVisible}
                 onStatusChange={setIdeStatus}
+                onWorkspaceChange={setIdeWorkspaceFolder}
               />
               
               {/* IDE Chat Sidebar - only rendered when visible */}
@@ -618,13 +623,13 @@ const App = () => {
                 }}
                 onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.errorCount > 0 ? '#f14c4c' : 'inherit' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.errorCount > 0 ? theme.error : 'inherit' }}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11zM7.25 4v5h1.5V4h-1.5zm0 6v1.5h1.5V10h-1.5z"/>
                     </svg>
                     {ideStatus.errorCount}
                   </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.warningCount > 0 ? '#cca700' : 'inherit' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.warningCount > 0 ? theme.warning : 'inherit' }}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M7.56 1h.88l6.54 12.26-.44.74H1.44l-.42-.74L7.56 1zm.44 1.67L2.63 13h10.74L8 2.67zM7.25 6v4h1.5V6h-1.5zm0 5v1.5h1.5V11h-1.5z"/>
                     </svg>
@@ -697,19 +702,36 @@ const App = () => {
                   {ideStatus.language}
                 </div>
                 )}
-                {/* Notifications */}
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                {/* Notifications - Opens Welcome Tab */}
+                <div 
+                  style={{ 
+                    padding: '0 8px',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    position: 'relative'
+                  }}
+                  onClick={() => ideModeRef.current?.openWelcomeTab?.()}
+                  title="Welcome & What's New"
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 1.5A5.5 5.5 0 0 0 2.5 7v3.5l-1 1V13h13v-1.5l-1-1V7A5.5 5.5 0 0 0 8 1.5zm0 13a2 2 0 0 1-2-2h4a2 2 0 0 1-2 2z"/>
                   </svg>
+                  {/* Notification dot for new updates */}
+                  {!localStorage.getItem('openmind-seen-v0.3.0') && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '6px',
+                      right: '6px',
+                      width: '6px',
+                      height: '6px',
+                      background: '#6366f1',
+                      borderRadius: '50%'
+                    }} />
+                  )}
                 </div>
               </div>
             </div>

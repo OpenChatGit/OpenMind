@@ -55,13 +55,37 @@ const TerminalPanel = ({
   const [problemFilter, setProblemFilter] = useState('all'); // all, errors, warnings
   const [outputFilter, setOutputFilter] = useState('all');
   const [expandedProblemFiles, setExpandedProblemFiles] = useState(new Set());
+  const [terminalContextMenu, setTerminalContextMenu] = useState(null); // { x, y, terminalId }
+  const [renamingTerminalId, setRenamingTerminalId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const terminalContainerRef = useRef(null);
+  const contextMenuRef = useRef(null);
+  const renameInputRef = useRef(null);
   const panelRef = useRef(null);
   const hasCreatedInitialTerminal = useRef(false);
   const xtermInstances = useRef(new Map());
   const outputRef = useRef(null);
   const debugRef = useRef(null);
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setTerminalContextMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Focus rename input when renaming starts
+  useEffect(() => {
+    if (renamingTerminalId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTerminalId]);
 
   // Handle resize drag
   useEffect(() => {
@@ -173,17 +197,23 @@ const TerminalPanel = ({
     if (instance) {
       const { terminal, fitAddon } = instance;
       
-      // Show the terminal element
-      if (terminal.element) {
-        terminal.element.style.display = '';
-      }
+      // Hide all other terminals first
+      xtermInstances.current.forEach(({ terminal: t }, id) => {
+        if (id !== activeTerminalId && t.element) {
+          t.element.style.display = 'none';
+        }
+      });
       
+      // Show and mount the active terminal
       if (!terminal.element) {
-        container.innerHTML = '';
+        // First time opening this terminal - open it in the container
         terminal.open(container);
-      } else if (terminal.element.parentElement !== container) {
-        container.innerHTML = '';
-        container.appendChild(terminal.element);
+      } else {
+        // Terminal already exists - make sure it's in the container and visible
+        if (terminal.element.parentElement !== container) {
+          container.appendChild(terminal.element);
+        }
+        terminal.element.style.display = '';
       }
 
       const fitAndFocus = () => {
@@ -284,6 +314,48 @@ const TerminalPanel = ({
     }
   };
 
+  // Rename terminal
+  const renameTerminal = (terminalId, newName) => {
+    if (!newName.trim()) return;
+    setTerminals(prev => prev.map(t => 
+      t.id === terminalId ? { ...t, name: newName.trim(), customName: true } : t
+    ));
+    setRenamingTerminalId(null);
+    setRenameValue('');
+  };
+
+  // Handle terminal context menu with boundary checking
+  const handleTerminalContextMenu = (e, terminalId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const menuWidth = 180;
+    const menuHeight = terminals.length > 1 ? 240 : 180; // Approximate height based on items
+    
+    let x = e.clientX;
+    let y = e.clientY;
+    
+    // Keep menu within window bounds
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+    if (x < 10) x = 10;
+    if (y < 10) y = 10;
+    
+    setTerminalContextMenu({ x, y, terminalId });
+  };
+
+  // Start renaming a terminal
+  const startRenameTerminal = (terminalId) => {
+    const terminal = terminals.find(t => t.id === terminalId);
+    setRenameValue(terminal?.name || terminal?.shell || 'Terminal');
+    setRenamingTerminalId(terminalId);
+    setTerminalContextMenu(null);
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -332,7 +404,7 @@ const TerminalPanel = ({
       {label}
       {badge > 0 && (
         <span style={{
-          background: id === 'problems' && errorCount > 0 ? '#f14c4c' : theme.accent,
+          background: id === 'problems' && errorCount > 0 ? theme.error : theme.accent,
           color: 'white', fontSize: '0.6rem', padding: '1px 5px',
           borderRadius: '8px', minWidth: '16px', textAlign: 'center'
         }}>{badge}</span>
@@ -361,9 +433,9 @@ const TerminalPanel = ({
   );
 
   const ProblemIcon = ({ severity }) => {
-    if (severity === 'error') return <AlertCircle size={14} color="#f14c4c" />;
-    if (severity === 'warning') return <AlertTriangle size={14} color="#cca700" />;
-    return <Info size={14} color="#3794ff" />;
+    if (severity === 'error') return <AlertCircle size={14} color={theme.error} />;
+    if (severity === 'warning') return <AlertTriangle size={14} color={theme.warning} />;
+    return <Info size={14} color={theme.info || '#3794ff'} />;
   };
 
   if (!isOpen) return null;
@@ -414,13 +486,13 @@ const TerminalPanel = ({
           borderRadius: '4px', cursor: 'pointer'
         }}>All ({problems.length})</button>
         <button onClick={() => setProblemFilter('errors')} style={{
-          background: problemFilter === 'errors' ? 'rgba(241,76,76,0.2)' : 'transparent',
-          border: 'none', color: '#f14c4c', fontSize: '0.75rem', padding: '2px 8px',
+          background: problemFilter === 'errors' ? theme.errorBg : 'transparent',
+          border: 'none', color: theme.error, fontSize: '0.75rem', padding: '2px 8px',
           borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
         }}><AlertCircle size={12} /> {errorCount}</button>
         <button onClick={() => setProblemFilter('warnings')} style={{
-          background: problemFilter === 'warnings' ? 'rgba(204,167,0,0.2)' : 'transparent',
-          border: 'none', color: '#cca700', fontSize: '0.75rem', padding: '2px 8px',
+          background: problemFilter === 'warnings' ? theme.warningBg : 'transparent',
+          border: 'none', color: theme.warning, fontSize: '0.75rem', padding: '2px 8px',
           borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
         }}><AlertTriangle size={12} /> {warningCount}</button>
       </div>
@@ -472,7 +544,7 @@ const TerminalPanel = ({
                   <span style={{ color: theme.textMuted, fontSize: '0.75rem', marginLeft: '4px' }}>{group.relativePath}</span>
                   {/* Problem Count Badge - right after path */}
                   <span style={{
-                    background: errorCount > 0 ? '#f14c4c' : '#cca700',
+                    background: errorCount > 0 ? theme.error : theme.warning,
                     color: '#fff',
                     fontSize: '0.65rem',
                     fontWeight: 600,
@@ -506,7 +578,7 @@ const TerminalPanel = ({
                       >
                         {/* Problem Icon - Lightbulb for suggestions, Circle for others */}
                         <span style={{ 
-                          color: problem.severity === 'error' ? '#f14c4c' : problem.severity === 'warning' ? '#cca700' : '#3794ff',
+                          color: problem.severity === 'error' ? theme.error : problem.severity === 'warning' ? theme.warning : (theme.info || '#3794ff'),
                           flexShrink: 0,
                           marginTop: '1px'
                         }}>
@@ -568,7 +640,7 @@ const TerminalPanel = ({
           <div style={{ color: theme.textMuted, textAlign: 'center', padding: '20px' }}>No output available.</div>
         ) : (
           outputLogs.map((log, i) => (
-            <div key={i} style={{ marginBottom: '2px', color: log.type === 'error' ? '#f14c4c' : log.type === 'warning' ? '#cca700' : theme.text }}>
+            <div key={i} style={{ marginBottom: '2px', color: log.type === 'error' ? theme.error : log.type === 'warning' ? theme.warning : theme.text }}>
               {log.timestamp && <span style={{ color: theme.textMuted }}>[{log.timestamp}] </span>}
               {log.message}
             </div>
@@ -599,7 +671,7 @@ const TerminalPanel = ({
           </div>
         ) : (
           debugLogs.map((log, i) => (
-            <div key={i} style={{ marginBottom: '2px', color: log.type === 'error' ? '#f14c4c' : log.type === 'warn' ? '#cca700' : log.type === 'info' ? '#3794ff' : theme.text }}>
+            <div key={i} style={{ marginBottom: '2px', color: log.type === 'error' ? theme.error : log.type === 'warn' ? theme.warning : log.type === 'info' ? (theme.info || '#3794ff') : theme.text }}>
               {log.message}
             </div>
           ))
@@ -665,20 +737,112 @@ const TerminalPanel = ({
     </div>
   );
 
-  // Render Terminal Tab
+  // Render Terminal Tab with sidebar for multiple terminals
   const renderTerminalTab = () => (
-    <div ref={terminalContainerRef} style={{ flex: 1, padding: '4px', background: '#1e1e1e', overflow: 'hidden' }}>
-      {terminals.length === 0 && (
-        <div style={{ color: theme.textMuted, padding: '20px', textAlign: 'center' }}>
-          <p>Starting terminal...</p>
-          <button onClick={createTerminal} style={{
-            marginTop: '12px', padding: '8px 16px', background: theme.accent,
-            border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer'
-          }}>Create Terminal</button>
+    <div style={{ flex: 1, display: 'flex', background: '#1e1e1e', overflow: 'hidden' }}>
+      {/* Terminal Content */}
+      <div ref={terminalContainerRef} style={{ flex: 1, padding: '4px', overflow: 'hidden' }}>
+        {terminals.length === 0 && (
+          <div style={{ color: theme.textMuted, padding: '20px', textAlign: 'center' }}>
+            <p>Starting terminal...</p>
+            <button onClick={createTerminal} style={{
+              marginTop: '12px', padding: '8px 16px', background: theme.accent,
+              border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer'
+            }}>Create Terminal</button>
+          </div>
+        )}
+      </div>
+      
+      {/* Terminal Sidebar - VS Code Style (only show when multiple terminals) */}
+      {terminals.length > 1 && (
+        <div style={{
+          width: '36px',
+          background: theme.bgSecondary,
+          borderLeft: `1px solid ${theme.border}`,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '4px 0',
+          gap: '2px',
+          overflowY: 'auto'
+        }}>
+          {terminals.map((term, index) => (
+            <button
+              key={term.id}
+              onClick={() => setActiveTerminalId(term.id)}
+              onContextMenu={(e) => handleTerminalContextMenu(e, term.id)}
+              title={`${index + 1}: ${term.customName ? term.name : term.shell}${term.folderName ? ` - ${term.folderName}` : ''}`}
+              style={{
+                width: '28px',
+                height: '28px',
+                background: term.id === activeTerminalId ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
+                border: term.id === activeTerminalId ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid transparent',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: term.id === activeTerminalId ? theme.text : theme.textMuted,
+                transition: 'all 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                if (term.id !== activeTerminalId) {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (term.id !== activeTerminalId) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'transparent';
+                }
+              }}
+            >
+              <TerminalIcon size={16} />
+            </button>
+          ))}
         </div>
       )}
     </div>
   );
+
+  // Copy terminal content to clipboard
+  const copyTerminalContent = (terminalId) => {
+    const instance = xtermInstances.current.get(terminalId);
+    if (instance) {
+      const selection = instance.terminal.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection);
+      }
+    }
+    setTerminalContextMenu(null);
+  };
+
+  // Clear terminal
+  const clearTerminal = (terminalId) => {
+    const instance = xtermInstances.current.get(terminalId);
+    if (instance) {
+      instance.terminal.clear();
+    }
+    setTerminalContextMenu(null);
+  };
+
+  // Kill all terminals except the selected one
+  const killOtherTerminals = async (terminalId) => {
+    const toKill = terminals.filter(t => t.id !== terminalId);
+    for (const term of toKill) {
+      await killTerminal(term.id);
+    }
+    setTerminalContextMenu(null);
+  };
+
+  // Kill all terminals
+  const killAllTerminals = async () => {
+    for (const term of terminals) {
+      await killTerminal(term.id);
+    }
+    setTerminalContextMenu(null);
+  };
 
   return (
     <div ref={panelRef} style={{
@@ -686,6 +850,219 @@ const TerminalPanel = ({
       background: '#1e1e1e', borderTop: `1px solid ${theme.border}`,
       position: 'relative', display: 'flex', flexDirection: 'column'
     }}>
+      {/* Terminal Context Menu */}
+      {terminalContextMenu && (
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            top: terminalContextMenu.y,
+            left: terminalContextMenu.x,
+            background: '#2d2d2d',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: '6px',
+            padding: '4px 0',
+            minWidth: '180px',
+            zIndex: 10000,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)'
+          }}
+        >
+          {/* Rename */}
+          <button
+            onClick={() => startRenameTerminal(terminalContextMenu.terminalId)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              width: '100%', padding: '6px 12px',
+              background: 'transparent', border: 'none',
+              color: theme.text, fontSize: '0.8rem',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.2)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <span style={{ width: '16px', textAlign: 'center' }}>✏️</span>
+            Rename...
+          </button>
+          
+          {/* Separator */}
+          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+          
+          {/* Copy Selection */}
+          <button
+            onClick={() => copyTerminalContent(terminalContextMenu.terminalId)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              width: '100%', padding: '6px 12px',
+              background: 'transparent', border: 'none',
+              color: theme.text, fontSize: '0.8rem',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.2)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <Copy size={14} />
+            Copy Selection
+          </button>
+          
+          {/* Clear Terminal */}
+          <button
+            onClick={() => clearTerminal(terminalContextMenu.terminalId)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              width: '100%', padding: '6px 12px',
+              background: 'transparent', border: 'none',
+              color: theme.text, fontSize: '0.8rem',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.2)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <RefreshCw size={14} />
+            Clear
+          </button>
+          
+          {/* Separator */}
+          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+          
+          {/* Kill Terminal */}
+          <button
+            onClick={() => { killTerminal(terminalContextMenu.terminalId); setTerminalContextMenu(null); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              width: '100%', padding: '6px 12px',
+              background: 'transparent', border: 'none',
+              color: theme.error, fontSize: '0.8rem',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = theme.errorBg}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <Trash2 size={14} />
+            Kill Terminal
+          </button>
+          
+          {/* Kill Other Terminals - only show if more than 1 terminal */}
+          {terminals.length > 1 && (
+            <button
+              onClick={() => killOtherTerminals(terminalContextMenu.terminalId)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                width: '100%', padding: '6px 12px',
+                background: 'transparent', border: 'none',
+                color: theme.textSecondary, fontSize: '0.8rem',
+                cursor: 'pointer', textAlign: 'left'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <X size={14} />
+              Kill Other Terminals
+            </button>
+          )}
+          
+          {/* Kill All Terminals - only show if more than 1 terminal */}
+          {terminals.length > 1 && (
+            <button
+              onClick={killAllTerminals}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                width: '100%', padding: '6px 12px',
+                background: 'transparent', border: 'none',
+                color: theme.error, fontSize: '0.8rem',
+                cursor: 'pointer', textAlign: 'left'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = theme.errorBg}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Trash size={14} />
+              Kill All Terminals
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Rename Terminal Dialog */}
+      {renamingTerminalId && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 10001
+          }}
+          onClick={() => setRenamingTerminalId(null)}
+        >
+          <div
+            style={{
+              background: '#2d2d2d',
+              border: '1px solid rgba(255,255,255,0.15)',
+              borderRadius: '8px',
+              padding: '16px',
+              minWidth: '300px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ marginBottom: '12px', color: theme.text, fontSize: '0.9rem', fontWeight: 500 }}>
+              Rename Terminal
+            </div>
+            <input
+              ref={renameInputRef}
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  renameTerminal(renamingTerminalId, renameValue);
+                } else if (e.key === 'Escape') {
+                  setRenamingTerminalId(null);
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: '#1e1e1e',
+                border: `1px solid ${theme.accent}`,
+                borderRadius: '4px',
+                color: theme.text,
+                fontSize: '0.85rem',
+                outline: 'none'
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button
+                onClick={() => setRenamingTerminalId(null)}
+                style={{
+                  padding: '6px 16px',
+                  background: 'transparent',
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: '4px',
+                  color: theme.text,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => renameTerminal(renamingTerminalId, renameValue)}
+                style={{
+                  padding: '6px 16px',
+                  background: theme.accent,
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem'
+                }}
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Resize Handle */}
       {!isMaximized && (
         <div onMouseDown={handleResizeStart} style={{
@@ -721,7 +1098,7 @@ const TerminalPanel = ({
                 onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
                   <TerminalIcon size={12} />
-                  <span>{activeTerminal?.folderName || 'powershell'}</span>
+                  <span>{activeTerminal?.shell || 'powershell'}</span>
                   <ChevronDown size={12} />
                 </button>
                 {showShellDropdown && (
@@ -731,13 +1108,20 @@ const TerminalPanel = ({
                     padding: '4px 0', minWidth: '200px', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
                   }}>
                     {terminals.map((term, i) => (
-                      <button key={term.id} onClick={() => { setActiveTerminalId(term.id); setShowShellDropdown(false); }} style={{
-                        display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 12px',
-                        background: term.id === activeTerminalId ? 'rgba(99,102,241,0.2)' : 'transparent',
-                        border: 'none', color: theme.text, fontSize: '0.8rem', cursor: 'pointer', textAlign: 'left'
-                      }}>
+                      <button 
+                        key={term.id} 
+                        onClick={() => { setActiveTerminalId(term.id); setShowShellDropdown(false); }}
+                        onContextMenu={(e) => { handleTerminalContextMenu(e, term.id); setShowShellDropdown(false); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '6px 12px',
+                          background: term.id === activeTerminalId ? 'rgba(99,102,241,0.2)' : 'transparent',
+                          border: 'none', color: theme.text, fontSize: '0.8rem', cursor: 'pointer', textAlign: 'left'
+                        }}
+                        onMouseEnter={(e) => { if (term.id !== activeTerminalId) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+                        onMouseLeave={(e) => { if (term.id !== activeTerminalId) e.currentTarget.style.background = 'transparent'; }}
+                      >
                         <TerminalIcon size={14} />
-                        <span style={{ flex: 1 }}>{i + 1}: {term.shell}</span>
+                        <span style={{ flex: 1 }}>{i + 1}: {term.customName ? term.name : term.shell}</span>
                         {term.folderName && <span style={{ color: theme.textMuted, fontSize: '0.7rem' }}>{term.folderName}</span>}
                       </button>
                     ))}

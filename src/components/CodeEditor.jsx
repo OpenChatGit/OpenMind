@@ -1,23 +1,60 @@
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import Editor, { useMonaco } from '@monaco-editor/react';
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useMemo } from 'react';
+import Editor from '@monaco-editor/react';
 import { useTheme } from '../contexts/ThemeContext';
+
+// Files that should be treated as plaintext (no validation)
+const plaintextFiles = new Set([
+  'license', 'licence', 'copying', 'readme', 'changelog', 'changes',
+  'authors', 'contributors', 'todo', 'notes', 'history', 'news',
+  'makefile', 'gemfile', 'procfile', 'vagrantfile', 'brewfile',
+  '.gitignore', '.gitattributes', '.gitmodules', '.npmignore', '.dockerignore',
+  '.env', '.env.local', '.env.development', '.env.production', '.env.example',
+  '.editorconfig', '.prettierignore', '.eslintignore', '.stylelintignore'
+]);
 
 // Map file extensions to Monaco language IDs
 const getLanguage = (filename) => {
-  const ext = filename?.split('.').pop()?.toLowerCase();
+  if (!filename) return 'plaintext';
+  
+  const lowerName = filename.toLowerCase();
+  
+  // Check for special filenames first
+  if (plaintextFiles.has(lowerName)) return 'plaintext';
+  
+  // Check for dotfiles without extension
+  if (lowerName.startsWith('.') && !lowerName.includes('.', 1)) return 'plaintext';
+  
+  const ext = lowerName.split('.').pop();
+  
+  // Text files without code
+  if (['txt', 'log', 'text', 'lst'].includes(ext)) return 'plaintext';
+  
   const languageMap = {
-    js: 'javascript', jsx: 'javascript', mjs: 'javascript',
-    ts: 'typescript', tsx: 'typescript',
-    py: 'python', rb: 'ruby', java: 'java', c: 'c', cpp: 'cpp', cs: 'csharp',
+    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+    py: 'python', pyw: 'python', pyx: 'python',
+    rb: 'ruby', java: 'java', c: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp',
+    h: 'c', hpp: 'cpp', hxx: 'cpp', cs: 'csharp',
     go: 'go', rs: 'rust', php: 'php', swift: 'swift', kt: 'kotlin', scala: 'scala',
     html: 'html', htm: 'html', css: 'css', scss: 'scss', sass: 'scss', less: 'less',
-    json: 'json', xml: 'xml', yaml: 'yaml', yml: 'yaml',
+    json: 'json', xml: 'xml', yaml: 'yaml', yml: 'yaml', toml: 'ini', ini: 'ini',
     md: 'markdown', mdx: 'markdown', sql: 'sql',
-    sh: 'shell', bash: 'shell', zsh: 'shell', ps1: 'powershell',
+    sh: 'shell', bash: 'shell', zsh: 'shell', fish: 'shell', ps1: 'powershell',
     dockerfile: 'dockerfile', graphql: 'graphql', gql: 'graphql',
     vue: 'html', svelte: 'html',
+    lua: 'lua', r: 'r', pl: 'perl', pm: 'perl',
+    ex: 'elixir', exs: 'elixir', erl: 'erlang',
+    hs: 'haskell', clj: 'clojure', cljs: 'clojure',
+    elm: 'elm', fs: 'fsharp', fsx: 'fsharp',
+    dart: 'dart', groovy: 'groovy', gradle: 'groovy',
   };
   return languageMap[ext] || 'plaintext';
+};
+
+// Check if language should have validation
+const shouldValidate = (language) => {
+  // Only validate languages that Monaco can properly check
+  return ['javascript', 'typescript', 'json', 'html', 'css'].includes(language);
 };
 
 // Map our theme names to Monaco themes
@@ -72,6 +109,25 @@ const CodeEditor = forwardRef(({
     editorRef.current = editor;
     monacoRef.current = monaco;
     setIsEditorReady(true);
+    
+    // Disable validation for non-code files
+    if (!shouldValidate(language)) {
+      // Disable all diagnostics for this model
+      const model = editor.getModel();
+      if (model) {
+        monaco.editor.setModelMarkers(model, 'owner', []);
+      }
+      
+      // Disable JavaScript/TypeScript validation
+      monaco.languages.typescript?.javascriptDefaults?.setDiagnosticsOptions({
+        noSemanticValidation: true,
+        noSyntaxValidation: true,
+      });
+      monaco.languages.typescript?.typescriptDefaults?.setDiagnosticsOptions({
+        noSemanticValidation: true,
+        noSyntaxValidation: true,
+      });
+    }
     
     // Listen for cursor position changes
     editor.onDidChangeCursorPosition((e) => {
@@ -201,6 +257,16 @@ const CodeEditor = forwardRef(({
   const handleValidate = useCallback((markers) => {
     if (!onMonacoDiagnostics || !mountedRef.current) return;
     
+    // Skip validation for non-code files
+    if (!shouldValidate(language)) {
+      // Clear any existing diagnostics
+      if (lastMarkersSignatureRef.current !== '') {
+        lastMarkersSignatureRef.current = '';
+        onMonacoDiagnostics([]);
+      }
+      return;
+    }
+    
     // Create signature to detect changes
     const signature = markers.map(m => `${m.startLineNumber}:${m.startColumn}:${m.message}`).join('|');
     if (signature === lastMarkersSignatureRef.current) return; // No change
@@ -218,7 +284,59 @@ const CodeEditor = forwardRef(({
     }));
     
     onMonacoDiagnostics(diagnostics);
-  }, [onMonacoDiagnostics]);
+  }, [onMonacoDiagnostics, language]);
+
+  // Memoize editor options to prevent unnecessary re-renders
+  const editorOptions = useMemo(() => ({
+    fontSize: 13,
+    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+    lineHeight: 21,
+    minimap: { enabled: true, scale: 1 },
+    scrollBeyondLastLine: false,
+    wordWrap: wordWrap ? 'on' : 'off',
+    automaticLayout: true,
+    tabSize: 2,
+    insertSpaces: true,
+    renderWhitespace: 'selection',
+    bracketPairColorization: { enabled: true },
+    guides: {
+      bracketPairs: true,
+      indentation: true
+    },
+    smoothScrolling: false, // Disable for better performance
+    cursorBlinking: 'blink', // Simpler cursor animation
+    cursorSmoothCaretAnimation: 'off', // Disable for better performance
+    padding: { top: 12, bottom: 12 },
+    folding: true,
+    foldingHighlight: true,
+    showFoldingControls: 'mouseover',
+    matchBrackets: 'always',
+    autoClosingBrackets: 'always',
+    autoClosingQuotes: 'always',
+    autoIndent: 'full',
+    formatOnPaste: false, // Disable for better performance
+    formatOnType: false, // Disable for better performance
+    suggestOnTriggerCharacters: true,
+    quickSuggestions: { other: true, comments: false, strings: false },
+    parameterHints: { enabled: true },
+    hover: { enabled: true, delay: 500 }, // Increased delay
+    links: true,
+    colorDecorators: true,
+    renderLineHighlight: 'line', // Changed from 'all' for better performance
+    occurrencesHighlight: 'off', // Disable for better performance
+    selectionHighlight: false, // Disable for better performance
+    contextmenu: true,
+    mouseWheelZoom: true,
+    dragAndDrop: true,
+    linkedEditing: false, // Disable for better performance
+    // Performance optimizations
+    largeFileOptimizations: true,
+    maxTokenizationLineLength: 10000, // Reduced for better performance
+    stopRenderingLineAfter: 10000,
+    renderValidationDecorations: 'editable',
+    fastScrollSensitivity: 5,
+    scrollPredominantAxis: true
+  }), [wordWrap]);
 
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -232,52 +350,7 @@ const CodeEditor = forwardRef(({
         onMount={handleEditorDidMount}
         onValidate={handleValidate}
         keepCurrentModel={true}
-        options={{
-          fontSize: 13,
-          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-          lineHeight: 21,
-          minimap: { enabled: true, scale: 1 },
-          scrollBeyondLastLine: false,
-          wordWrap: wordWrap ? 'on' : 'off',
-          automaticLayout: true,
-          tabSize: 2,
-          insertSpaces: true,
-          renderWhitespace: 'selection',
-          bracketPairColorization: { enabled: true },
-          guides: {
-            bracketPairs: true,
-            indentation: true
-          },
-          smoothScrolling: true,
-          cursorBlinking: 'smooth',
-          cursorSmoothCaretAnimation: 'on',
-          padding: { top: 12, bottom: 12 },
-          folding: true,
-          foldingHighlight: true,
-          showFoldingControls: 'mouseover',
-          matchBrackets: 'always',
-          autoClosingBrackets: 'always',
-          autoClosingQuotes: 'always',
-          autoIndent: 'full',
-          formatOnPaste: true,
-          formatOnType: true,
-          suggestOnTriggerCharacters: true,
-          quickSuggestions: true,
-          parameterHints: { enabled: true },
-          hover: { enabled: true, delay: 300 },
-          links: true,
-          colorDecorators: true,
-          renderLineHighlight: 'all',
-          occurrencesHighlight: 'singleFile',
-          selectionHighlight: true,
-          contextmenu: true,
-          mouseWheelZoom: true,
-          dragAndDrop: true,
-          linkedEditing: true,
-          // Performance
-          largeFileOptimizations: true,
-          maxTokenizationLineLength: 20000
-        }}
+        options={editorOptions}
         loading={
           <div style={{ 
             display: 'flex', 

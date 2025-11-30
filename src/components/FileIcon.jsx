@@ -1,7 +1,8 @@
 import { memo, useMemo } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
-// Seti UI color palette
-const colors = {
+// Seti UI color palette - default colors
+const defaultColors = {
   blue: '#519aba',
   grey: '#4d5a5e',
   'grey-light': '#6d8086',
@@ -15,475 +16,513 @@ const colors = {
   ignore: '#41535b',
 };
 
-// Extension to icon mapping based on Seti UI
+// Colorblind-friendly color palettes
+const colorblindPalettes = {
+  none: defaultColors,
+  deuteranopia: {
+    ...defaultColors,
+    red: '#d55e00',      // Orange-Red (distinguishable from green)
+    green: '#0072b2',    // Blue (instead of green)
+    pink: '#cc79a7',     // Muted pink
+  },
+  protanopia: {
+    ...defaultColors,
+    red: '#e69f00',      // Orange (instead of red)
+    green: '#0072b2',    // Blue (instead of green)
+    pink: '#cc79a7',     // Muted pink
+  },
+  tritanopia: {
+    ...defaultColors,
+    blue: '#009e73',     // Teal (instead of blue)
+    yellow: '#cc79a7',   // Pink (instead of yellow)
+    pink: '#d55e00',     // Orange-Red
+  },
+  monochromacy: {
+    ...defaultColors,
+    blue: '#666666',
+    green: '#888888',
+    red: '#444444',
+    pink: '#777777',
+    purple: '#555555',
+    orange: '#999999',
+    yellow: '#aaaaaa',
+  }
+};
+
+// Get colors based on colorblind mode
+const getColors = (colorblindMode) => {
+  return colorblindPalettes[colorblindMode] || defaultColors;
+};
+
+// Extension to icon mapping based on Seti UI (using defaultColors)
 const extensionMap = {
   // JavaScript
-  'js': { icon: 'javascript', color: colors.yellow },
-  'mjs': { icon: 'javascript', color: colors.yellow },
-  'cjs': { icon: 'javascript', color: colors.yellow },
-  'es6': { icon: 'javascript', color: colors.yellow },
+  'js': { icon: 'javascript', color: defaultColors.yellow },
+  'mjs': { icon: 'javascript', color: defaultColors.yellow },
+  'cjs': { icon: 'javascript', color: defaultColors.yellow },
+  'es6': { icon: 'javascript', color: defaultColors.yellow },
   
   // TypeScript
-  'ts': { icon: 'typescript', color: colors.blue },
-  'd.ts': { icon: 'typescript', color: colors.blue },
+  'ts': { icon: 'typescript', color: defaultColors.blue },
+  'd.ts': { icon: 'typescript', color: defaultColors.blue },
   
   // React
-  'jsx': { icon: 'react', color: colors.blue },
-  'tsx': { icon: 'react', color: colors.blue },
+  'jsx': { icon: 'react', color: defaultColors.blue },
+  'tsx': { icon: 'react', color: defaultColors.blue },
   
   // HTML
-  'html': { icon: 'html', color: colors.orange },
-  'htm': { icon: 'html', color: colors.orange },
+  'html': { icon: 'html', color: defaultColors.orange },
+  'htm': { icon: 'html', color: defaultColors.orange },
   
   // CSS
-  'css': { icon: 'css', color: colors.blue },
-  'scss': { icon: 'sass', color: colors.pink },
-  'sass': { icon: 'sass', color: colors.pink },
-  'less': { icon: 'less', color: colors.blue },
-  'styl': { icon: 'stylus', color: colors.green },
+  'css': { icon: 'css', color: defaultColors.blue },
+  'scss': { icon: 'sass', color: defaultColors.pink },
+  'sass': { icon: 'sass', color: defaultColors.pink },
+  'less': { icon: 'less', color: defaultColors.blue },
+  'styl': { icon: 'stylus', color: defaultColors.green },
   
   // JSON
-  'json': { icon: 'json', color: colors.yellow },
-  'cson': { icon: 'json', color: colors.yellow },
+  'json': { icon: 'json', color: defaultColors.yellow },
+  'cson': { icon: 'json', color: defaultColors.yellow },
   
   // Markdown
-  'md': { icon: 'markdown', color: colors.blue },
-  'markdown': { icon: 'markdown', color: colors.blue },
-  'mdx': { icon: 'markdown', color: colors.blue },
+  'md': { icon: 'markdown', color: defaultColors.blue },
+  'markdown': { icon: 'markdown', color: defaultColors.blue },
+  'mdx': { icon: 'markdown', color: defaultColors.blue },
   
   // Python
-  'py': { icon: 'python', color: colors.blue },
-  'pyw': { icon: 'python', color: colors.blue },
-  'pyx': { icon: 'python', color: colors.blue },
+  'py': { icon: 'python', color: defaultColors.blue },
+  'pyw': { icon: 'python', color: defaultColors.blue },
+  'pyx': { icon: 'python', color: defaultColors.blue },
   
   // Ruby
-  'rb': { icon: 'ruby', color: colors.red },
-  'erb': { icon: 'html_erb', color: colors.red },
+  'rb': { icon: 'ruby', color: defaultColors.red },
+  'erb': { icon: 'html_erb', color: defaultColors.red },
   
   // PHP
-  'php': { icon: 'php', color: colors.purple },
+  'php': { icon: 'php', color: defaultColors.purple },
   
   // Java
-  'java': { icon: 'java', color: colors.red },
-  'class': { icon: 'java', color: colors.blue },
-  'jar': { icon: 'zip', color: colors.red },
+  'java': { icon: 'java', color: defaultColors.red },
+  'class': { icon: 'java', color: defaultColors.blue },
+  'jar': { icon: 'zip', color: defaultColors.red },
   
   // C/C++
-  'c': { icon: 'c', color: colors.blue },
-  'h': { icon: 'c', color: colors.purple },
-  'cpp': { icon: 'cpp', color: colors.blue },
-  'cc': { icon: 'cpp', color: colors.blue },
-  'cxx': { icon: 'cpp', color: colors.blue },
-  'hpp': { icon: 'cpp', color: colors.purple },
-  'hxx': { icon: 'cpp', color: colors.purple },
+  'c': { icon: 'c', color: defaultColors.blue },
+  'h': { icon: 'c', color: defaultColors.purple },
+  'cpp': { icon: 'cpp', color: defaultColors.blue },
+  'cc': { icon: 'cpp', color: defaultColors.blue },
+  'cxx': { icon: 'cpp', color: defaultColors.blue },
+  'hpp': { icon: 'cpp', color: defaultColors.purple },
+  'hxx': { icon: 'cpp', color: defaultColors.purple },
   
   // C#
-  'cs': { icon: 'c-sharp', color: colors.blue },
+  'cs': { icon: 'c-sharp', color: defaultColors.blue },
   
   // Go
-  'go': { icon: 'go2', color: colors.blue },
+  'go': { icon: 'go2', color: defaultColors.blue },
   
   // Rust
-  'rs': { icon: 'rust', color: colors['grey-light'] },
+  'rs': { icon: 'rust', color: defaultColors['grey-light'] },
   
   // Swift
-  'swift': { icon: 'swift', color: colors.orange },
+  'swift': { icon: 'swift', color: defaultColors.orange },
   
   // Kotlin
-  'kt': { icon: 'kotlin', color: colors.orange },
-  'kts': { icon: 'kotlin', color: colors.orange },
+  'kt': { icon: 'kotlin', color: defaultColors.orange },
+  'kts': { icon: 'kotlin', color: defaultColors.orange },
   
   // Scala
-  'scala': { icon: 'scala', color: colors.red },
+  'scala': { icon: 'scala', color: defaultColors.red },
   
   // Dart
-  'dart': { icon: 'dart', color: colors.blue },
+  'dart': { icon: 'dart', color: defaultColors.blue },
   
   // Shell
-  'sh': { icon: 'shell', color: colors.green },
-  'bash': { icon: 'shell', color: colors.green },
-  'zsh': { icon: 'shell', color: colors.green },
-  'fish': { icon: 'shell', color: colors.green },
+  'sh': { icon: 'shell', color: defaultColors.green },
+  'bash': { icon: 'shell', color: defaultColors.green },
+  'zsh': { icon: 'shell', color: defaultColors.green },
+  'fish': { icon: 'shell', color: defaultColors.green },
   
   // PowerShell
-  'ps1': { icon: 'powershell', color: colors.blue },
-  'psm1': { icon: 'powershell', color: colors.blue },
-  'psd1': { icon: 'powershell', color: colors.blue },
+  'ps1': { icon: 'powershell', color: defaultColors.blue },
+  'psm1': { icon: 'powershell', color: defaultColors.blue },
+  'psd1': { icon: 'powershell', color: defaultColors.blue },
   
   // Windows
-  'bat': { icon: 'windows', color: colors.blue },
-  'cmd': { icon: 'windows', color: colors.blue },
+  'bat': { icon: 'windows', color: defaultColors.blue },
+  'cmd': { icon: 'windows', color: defaultColors.blue },
   
   // Config
-  'yml': { icon: 'yml', color: colors.purple },
-  'yaml': { icon: 'yml', color: colors.purple },
-  'xml': { icon: 'xml', color: colors.orange },
-  'toml': { icon: 'config', color: colors['grey-light'] },
-  'ini': { icon: 'config', color: colors['grey-light'] },
-  'conf': { icon: 'config', color: colors['grey-light'] },
-  'config': { icon: 'config', color: colors['grey-light'] },
+  'yml': { icon: 'yml', color: defaultColors.purple },
+  'yaml': { icon: 'yml', color: defaultColors.purple },
+  'xml': { icon: 'xml', color: defaultColors.orange },
+  'toml': { icon: 'config', color: defaultColors['grey-light'] },
+  'ini': { icon: 'config', color: defaultColors['grey-light'] },
+  'conf': { icon: 'config', color: defaultColors['grey-light'] },
+  'config': { icon: 'config', color: defaultColors['grey-light'] },
   
   // Database
-  'sql': { icon: 'db', color: colors.pink },
-  'sqlite': { icon: 'db', color: colors.pink },
-  'prisma': { icon: 'prisma', color: colors.blue },
+  'sql': { icon: 'db', color: defaultColors.pink },
+  'sqlite': { icon: 'db', color: defaultColors.pink },
+  'prisma': { icon: 'prisma', color: defaultColors.blue },
   
   // GraphQL
-  'graphql': { icon: 'graphql', color: colors.pink },
-  'gql': { icon: 'graphql', color: colors.pink },
+  'graphql': { icon: 'graphql', color: defaultColors.pink },
+  'gql': { icon: 'graphql', color: defaultColors.pink },
   
   // Vue
-  'vue': { icon: 'vue', color: colors.green },
+  'vue': { icon: 'vue', color: defaultColors.green },
   
   // Svelte
-  'svelte': { icon: 'svelte', color: colors.red },
+  'svelte': { icon: 'svelte', color: defaultColors.red },
   
   // Templates
-  'ejs': { icon: 'ejs', color: colors.yellow },
-  'pug': { icon: 'pug', color: colors.red },
-  'jade': { icon: 'jade', color: colors.red },
-  'hbs': { icon: 'mustache', color: colors.orange },
-  'handlebars': { icon: 'mustache', color: colors.orange },
-  'mustache': { icon: 'mustache', color: colors.orange },
-  'twig': { icon: 'twig', color: colors.green },
-  'liquid': { icon: 'liquid', color: colors.green },
-  'njk': { icon: 'nunjucks', color: colors.green },
+  'ejs': { icon: 'ejs', color: defaultColors.yellow },
+  'pug': { icon: 'pug', color: defaultColors.red },
+  'jade': { icon: 'jade', color: defaultColors.red },
+  'hbs': { icon: 'mustache', color: defaultColors.orange },
+  'handlebars': { icon: 'mustache', color: defaultColors.orange },
+  'mustache': { icon: 'mustache', color: defaultColors.orange },
+  'twig': { icon: 'twig', color: defaultColors.green },
+  'liquid': { icon: 'liquid', color: defaultColors.green },
+  'njk': { icon: 'nunjucks', color: defaultColors.green },
   
   // Images
-  'png': { icon: 'image', color: colors.purple },
-  'jpg': { icon: 'image', color: colors.purple },
-  'jpeg': { icon: 'image', color: colors.purple },
-  'gif': { icon: 'image', color: colors.purple },
-  'webp': { icon: 'image', color: colors.purple },
-  'avif': { icon: 'image', color: colors.purple },
-  'ico': { icon: 'favicon', color: colors.yellow },
-  'svg': { icon: 'svg', color: colors.purple },
+  'png': { icon: 'image', color: defaultColors.purple },
+  'jpg': { icon: 'image', color: defaultColors.purple },
+  'jpeg': { icon: 'image', color: defaultColors.purple },
+  'gif': { icon: 'image', color: defaultColors.purple },
+  'webp': { icon: 'image', color: defaultColors.purple },
+  'avif': { icon: 'image', color: defaultColors.purple },
+  'ico': { icon: 'favicon', color: defaultColors.yellow },
+  'svg': { icon: 'svg', color: defaultColors.purple },
   
   // Fonts
-  'ttf': { icon: 'font', color: colors.red },
-  'otf': { icon: 'font', color: colors.red },
-  'woff': { icon: 'font', color: colors.red },
-  'woff2': { icon: 'font', color: colors.red },
-  'eot': { icon: 'font', color: colors.red },
+  'ttf': { icon: 'font', color: defaultColors.red },
+  'otf': { icon: 'font', color: defaultColors.red },
+  'woff': { icon: 'font', color: defaultColors.red },
+  'woff2': { icon: 'font', color: defaultColors.red },
+  'eot': { icon: 'font', color: defaultColors.red },
   
   // Audio
-  'mp3': { icon: 'audio', color: colors.purple },
-  'wav': { icon: 'audio', color: colors.purple },
-  'ogg': { icon: 'audio', color: colors.purple },
-  'flac': { icon: 'audio', color: colors.purple },
+  'mp3': { icon: 'audio', color: defaultColors.purple },
+  'wav': { icon: 'audio', color: defaultColors.purple },
+  'ogg': { icon: 'audio', color: defaultColors.purple },
+  'flac': { icon: 'audio', color: defaultColors.purple },
   
   // Video
-  'mp4': { icon: 'video', color: colors.pink },
-  'webm': { icon: 'video', color: colors.pink },
-  'mov': { icon: 'video', color: colors.pink },
-  'avi': { icon: 'video', color: colors.pink },
-  'mkv': { icon: 'video', color: colors.pink },
+  'mp4': { icon: 'video', color: defaultColors.pink },
+  'webm': { icon: 'video', color: defaultColors.pink },
+  'mov': { icon: 'video', color: defaultColors.pink },
+  'avi': { icon: 'video', color: defaultColors.pink },
+  'mkv': { icon: 'video', color: defaultColors.pink },
   
   // Archives
-  'zip': { icon: 'zip', color: colors['grey-light'] },
-  'tar': { icon: 'zip', color: colors['grey-light'] },
-  'gz': { icon: 'zip', color: colors['grey-light'] },
-  'rar': { icon: 'zip', color: colors['grey-light'] },
-  '7z': { icon: 'zip', color: colors['grey-light'] },
+  'zip': { icon: 'zip', color: defaultColors['grey-light'] },
+  'tar': { icon: 'zip', color: defaultColors['grey-light'] },
+  'gz': { icon: 'zip', color: defaultColors['grey-light'] },
+  'rar': { icon: 'zip', color: defaultColors['grey-light'] },
+  '7z': { icon: 'zip', color: defaultColors['grey-light'] },
   
   // Documents
-  'pdf': { icon: 'pdf', color: colors.red },
-  'doc': { icon: 'word', color: colors.blue },
-  'docx': { icon: 'word', color: colors.blue },
-  'xls': { icon: 'xls', color: colors.green },
-  'xlsx': { icon: 'xls', color: colors.green },
-  'csv': { icon: 'csv', color: colors.green },
+  'pdf': { icon: 'pdf', color: defaultColors.red },
+  'doc': { icon: 'word', color: defaultColors.blue },
+  'docx': { icon: 'word', color: defaultColors.blue },
+  'xls': { icon: 'xls', color: defaultColors.green },
+  'xlsx': { icon: 'xls', color: defaultColors.green },
+  'csv': { icon: 'csv', color: defaultColors.green },
   
   // Adobe
-  'psd': { icon: 'photoshop', color: colors.blue },
-  'ai': { icon: 'illustrator', color: colors.yellow },
+  'psd': { icon: 'photoshop', color: defaultColors.blue },
+  'ai': { icon: 'illustrator', color: defaultColors.yellow },
   
   // Git
-  'gitignore': { icon: 'git', color: colors.ignore },
-  'gitattributes': { icon: 'git', color: colors.ignore },
-  'gitmodules': { icon: 'git', color: colors.ignore },
+  'gitignore': { icon: 'git', color: defaultColors.ignore },
+  'gitattributes': { icon: 'git', color: defaultColors.ignore },
+  'gitmodules': { icon: 'git', color: defaultColors.ignore },
   
   // Misc
-  'log': { icon: 'default', color: colors['grey-light'] },
-  'txt': { icon: 'default', color: colors.white },
-  'lock': { icon: 'lock', color: colors.green },
+  'log': { icon: 'default', color: defaultColors['grey-light'] },
+  'txt': { icon: 'default', color: defaultColors.white },
+  'lock': { icon: 'lock', color: defaultColors.green },
   
   // Elixir
-  'ex': { icon: 'elixir', color: colors.purple },
-  'exs': { icon: 'elixir_script', color: colors.purple },
+  'ex': { icon: 'elixir', color: defaultColors.purple },
+  'exs': { icon: 'elixir_script', color: defaultColors.purple },
   
   // Haskell
-  'hs': { icon: 'haskell', color: colors.purple },
-  'lhs': { icon: 'haskell', color: colors.purple },
+  'hs': { icon: 'haskell', color: defaultColors.purple },
+  'lhs': { icon: 'haskell', color: defaultColors.purple },
   
   // Clojure
-  'clj': { icon: 'clojure', color: colors.green },
-  'cljs': { icon: 'clojure', color: colors.green },
-  'cljc': { icon: 'clojure', color: colors.green },
+  'clj': { icon: 'clojure', color: defaultColors.green },
+  'cljs': { icon: 'clojure', color: defaultColors.green },
+  'cljc': { icon: 'clojure', color: defaultColors.green },
   
   // Lua
-  'lua': { icon: 'lua', color: colors.blue },
+  'lua': { icon: 'lua', color: defaultColors.blue },
   
   // R
-  'r': { icon: 'R', color: colors.blue },
-  'rmd': { icon: 'R', color: colors.blue },
+  'r': { icon: 'R', color: defaultColors.blue },
+  'rmd': { icon: 'R', color: defaultColors.blue },
   
   // Julia
-  'jl': { icon: 'julia', color: colors.purple },
+  'jl': { icon: 'julia', color: defaultColors.purple },
   
   // Elm
-  'elm': { icon: 'elm', color: colors.blue },
+  'elm': { icon: 'elm', color: defaultColors.blue },
   
   // F#
-  'fs': { icon: 'f-sharp', color: colors.blue },
-  'fsx': { icon: 'f-sharp', color: colors.blue },
+  'fs': { icon: 'f-sharp', color: defaultColors.blue },
+  'fsx': { icon: 'f-sharp', color: defaultColors.blue },
   
   // OCaml
-  'ml': { icon: 'ocaml', color: colors.orange },
-  'mli': { icon: 'ocaml', color: colors.orange },
+  'ml': { icon: 'ocaml', color: defaultColors.orange },
+  'mli': { icon: 'ocaml', color: defaultColors.orange },
   
   // Perl
-  'pl': { icon: 'perl', color: colors.blue },
-  'pm': { icon: 'perl', color: colors.blue },
+  'pl': { icon: 'perl', color: defaultColors.blue },
+  'pm': { icon: 'perl', color: defaultColors.blue },
   
   // Groovy
-  'groovy': { icon: 'grails', color: colors.green },
-  'gradle': { icon: 'gradle', color: colors.blue },
+  'groovy': { icon: 'grails', color: defaultColors.green },
+  'gradle': { icon: 'gradle', color: defaultColors.blue },
   
   // Terraform
-  'tf': { icon: 'terraform', color: colors.purple },
-  'tfvars': { icon: 'terraform', color: colors.purple },
+  'tf': { icon: 'terraform', color: defaultColors.purple },
+  'tfvars': { icon: 'terraform', color: defaultColors.purple },
   
   // Docker
-  'dockerfile': { icon: 'docker', color: colors.blue },
+  'dockerfile': { icon: 'docker', color: defaultColors.blue },
   
   // Solidity
-  'sol': { icon: 'ethereum', color: colors.blue },
+  'sol': { icon: 'ethereum', color: defaultColors.blue },
   
   // WebAssembly
-  'wasm': { icon: 'wasm', color: colors.purple },
-  'wat': { icon: 'wat', color: colors.purple },
+  'wasm': { icon: 'wasm', color: defaultColors.purple },
+  'wat': { icon: 'wat', color: defaultColors.purple },
   
   // Zig
-  'zig': { icon: 'zig', color: colors.orange },
+  'zig': { icon: 'zig', color: defaultColors.orange },
   
   // Nim
-  'nim': { icon: 'nim', color: colors.yellow },
+  'nim': { icon: 'nim', color: defaultColors.yellow },
   
   // Crystal
-  'cr': { icon: 'crystal', color: colors.white },
+  'cr': { icon: 'crystal', color: defaultColors.white },
   
   // D
-  'd': { icon: 'd', color: colors.red },
+  'd': { icon: 'd', color: defaultColors.red },
   
   // Assembly
-  'asm': { icon: 'asm', color: colors.red },
-  's': { icon: 'asm', color: colors.red },
+  'asm': { icon: 'asm', color: defaultColors.red },
+  's': { icon: 'asm', color: defaultColors.red },
   
   // CUDA
-  'cu': { icon: 'cu', color: colors.green },
-  'cuh': { icon: 'cu', color: colors.purple },
+  'cu': { icon: 'cu', color: defaultColors.green },
+  'cuh': { icon: 'cu', color: defaultColors.purple },
 };
 
-// Special filename mappings
+// Special filename mappings (using defaultColors)
 const filenameMap = {
-  'package.json': { icon: 'npm', color: colors.red },
-  'package-lock.json': { icon: 'npm', color: colors.red },
-  '.npmrc': { icon: 'npm', color: colors.red },
-  '.npmignore': { icon: 'npm', color: colors.red },
-  'yarn.lock': { icon: 'yarn', color: colors.blue },
-  '.yarnrc': { icon: 'yarn', color: colors.blue },
-  'tsconfig.json': { icon: 'tsconfig', color: colors.blue },
-  'jsconfig.json': { icon: 'json', color: colors.yellow },
-  '.gitignore': { icon: 'git', color: colors.ignore },
-  '.gitattributes': { icon: 'git', color: colors.ignore },
-  '.gitmodules': { icon: 'git', color: colors.ignore },
-  '.env': { icon: 'config', color: colors['grey-light'] },
-  '.env.local': { icon: 'config', color: colors['grey-light'] },
-  '.env.development': { icon: 'config', color: colors['grey-light'] },
-  '.env.production': { icon: 'config', color: colors['grey-light'] },
-  '.env.example': { icon: 'config', color: colors['grey-light'] },
-  'dockerfile': { icon: 'docker', color: colors.blue },
-  'docker-compose.yml': { icon: 'docker', color: colors.pink },
-  'docker-compose.yaml': { icon: 'docker', color: colors.pink },
-  '.dockerignore': { icon: 'docker', color: colors.grey },
-  'vite.config.js': { icon: 'javascript', color: colors.yellow },
-  'vite.config.ts': { icon: 'typescript', color: colors.blue },
-  'webpack.config.js': { icon: 'webpack', color: colors.blue },
-  'webpack.config.ts': { icon: 'webpack', color: colors.blue },
-  'rollup.config.js': { icon: 'rollup', color: colors.red },
-  'rollup.config.ts': { icon: 'rollup', color: colors.red },
-  'eslint.config.js': { icon: 'eslint', color: colors.purple },
-  'eslint.config.mjs': { icon: 'eslint', color: colors.purple },
-  '.eslintrc': { icon: 'eslint', color: colors.purple },
-  '.eslintrc.js': { icon: 'eslint', color: colors.purple },
-  '.eslintrc.json': { icon: 'eslint', color: colors.purple },
-  '.eslintignore': { icon: 'eslint', color: colors.grey },
-  '.prettierrc': { icon: 'config', color: colors['grey-light'] },
-  '.prettierrc.js': { icon: 'config', color: colors['grey-light'] },
-  '.prettierrc.json': { icon: 'config', color: colors['grey-light'] },
-  '.prettierignore': { icon: 'config', color: colors.grey },
-  '.stylelintrc': { icon: 'stylelint', color: colors.white },
-  '.stylelintrc.json': { icon: 'stylelint', color: colors.white },
-  'stylelint.config.js': { icon: 'stylelint', color: colors.white },
-  '.babelrc': { icon: 'babel', color: colors.yellow },
-  '.babelrc.js': { icon: 'babel', color: colors.yellow },
-  'babel.config.js': { icon: 'babel', color: colors.yellow },
-  'babel.config.json': { icon: 'babel', color: colors.yellow },
-  '.editorconfig': { icon: 'editorconfig', color: colors['grey-light'] },
-  'readme.md': { icon: 'info', color: colors.blue },
-  'readme.txt': { icon: 'info', color: colors.blue },
-  'readme': { icon: 'info', color: colors.blue },
-  'changelog.md': { icon: 'clock', color: colors.blue },
-  'changelog.txt': { icon: 'clock', color: colors.blue },
-  'changelog': { icon: 'clock', color: colors.blue },
-  'license': { icon: 'license', color: colors.yellow },
-  'license.md': { icon: 'license', color: colors.yellow },
-  'license.txt': { icon: 'license', color: colors.yellow },
-  'licence': { icon: 'license', color: colors.yellow },
-  'copying': { icon: 'license', color: colors.yellow },
-  'contributing.md': { icon: 'license', color: colors.red },
-  'makefile': { icon: 'makefile', color: colors.orange },
-  'cmakelists.txt': { icon: 'makefile', color: colors.blue },
-  'gruntfile.js': { icon: 'grunt', color: colors.orange },
-  'gulpfile.js': { icon: 'gulp', color: colors.red },
-  'gulpfile.babel.js': { icon: 'gulp', color: colors.red },
-  'jenkinsfile': { icon: 'jenkins', color: colors.red },
-  'procfile': { icon: 'heroku', color: colors.purple },
-  '.gitlab-ci.yml': { icon: 'gitlab', color: colors.orange },
-  'firebase.json': { icon: 'firebase', color: colors.orange },
-  '.firebaserc': { icon: 'firebase', color: colors.orange },
-  'karma.conf.js': { icon: 'karma', color: colors.green },
-  'todo.md': { icon: 'todo', color: colors.blue },
-  'todo.txt': { icon: 'todo', color: colors.blue },
-  'todo': { icon: 'todo', color: colors.blue },
-  'pom.xml': { icon: 'maven', color: colors.red },
-  'bower.json': { icon: 'bower', color: colors.orange },
-  '.bowerrc': { icon: 'bower', color: colors.orange },
-  'ionic.config.json': { icon: 'ionic', color: colors.blue },
-  'platformio.ini': { icon: 'platformio', color: colors.orange },
-  '.codeclimate.yml': { icon: 'code-climate', color: colors.green },
-  'swagger.json': { icon: 'json', color: colors.green },
-  'swagger.yml': { icon: 'json', color: colors.green },
-  'swagger.yaml': { icon: 'json', color: colors.green },
+  'package.json': { icon: 'npm', color: defaultColors.red },
+  'package-lock.json': { icon: 'npm', color: defaultColors.red },
+  '.npmrc': { icon: 'npm', color: defaultColors.red },
+  '.npmignore': { icon: 'npm', color: defaultColors.red },
+  'yarn.lock': { icon: 'yarn', color: defaultColors.blue },
+  '.yarnrc': { icon: 'yarn', color: defaultColors.blue },
+  'tsconfig.json': { icon: 'tsconfig', color: defaultColors.blue },
+  'jsconfig.json': { icon: 'json', color: defaultColors.yellow },
+  '.gitignore': { icon: 'git', color: defaultColors.ignore },
+  '.gitattributes': { icon: 'git', color: defaultColors.ignore },
+  '.gitmodules': { icon: 'git', color: defaultColors.ignore },
+  '.env': { icon: 'config', color: defaultColors['grey-light'] },
+  '.env.local': { icon: 'config', color: defaultColors['grey-light'] },
+  '.env.development': { icon: 'config', color: defaultColors['grey-light'] },
+  '.env.production': { icon: 'config', color: defaultColors['grey-light'] },
+  '.env.example': { icon: 'config', color: defaultColors['grey-light'] },
+  'dockerfile': { icon: 'docker', color: defaultColors.blue },
+  'docker-compose.yml': { icon: 'docker', color: defaultColors.pink },
+  'docker-compose.yaml': { icon: 'docker', color: defaultColors.pink },
+  '.dockerignore': { icon: 'docker', color: defaultColors.grey },
+  'vite.config.js': { icon: 'javascript', color: defaultColors.yellow },
+  'vite.config.ts': { icon: 'typescript', color: defaultColors.blue },
+  'webpack.config.js': { icon: 'webpack', color: defaultColors.blue },
+  'webpack.config.ts': { icon: 'webpack', color: defaultColors.blue },
+  'rollup.config.js': { icon: 'rollup', color: defaultColors.red },
+  'rollup.config.ts': { icon: 'rollup', color: defaultColors.red },
+  'eslint.config.js': { icon: 'eslint', color: defaultColors.purple },
+  'eslint.config.mjs': { icon: 'eslint', color: defaultColors.purple },
+  '.eslintrc': { icon: 'eslint', color: defaultColors.purple },
+  '.eslintrc.js': { icon: 'eslint', color: defaultColors.purple },
+  '.eslintrc.json': { icon: 'eslint', color: defaultColors.purple },
+  '.eslintignore': { icon: 'eslint', color: defaultColors.grey },
+  '.prettierrc': { icon: 'config', color: defaultColors['grey-light'] },
+  '.prettierrc.js': { icon: 'config', color: defaultColors['grey-light'] },
+  '.prettierrc.json': { icon: 'config', color: defaultColors['grey-light'] },
+  '.prettierignore': { icon: 'config', color: defaultColors.grey },
+  '.stylelintrc': { icon: 'stylelint', color: defaultColors.white },
+  '.stylelintrc.json': { icon: 'stylelint', color: defaultColors.white },
+  'stylelint.config.js': { icon: 'stylelint', color: defaultColors.white },
+  '.babelrc': { icon: 'babel', color: defaultColors.yellow },
+  '.babelrc.js': { icon: 'babel', color: defaultColors.yellow },
+  'babel.config.js': { icon: 'babel', color: defaultColors.yellow },
+  'babel.config.json': { icon: 'babel', color: defaultColors.yellow },
+  '.editorconfig': { icon: 'editorconfig', color: defaultColors['grey-light'] },
+  'readme.md': { icon: 'info', color: defaultColors.blue },
+  'readme.txt': { icon: 'info', color: defaultColors.blue },
+  'readme': { icon: 'info', color: defaultColors.blue },
+  'changelog.md': { icon: 'clock', color: defaultColors.blue },
+  'changelog.txt': { icon: 'clock', color: defaultColors.blue },
+  'changelog': { icon: 'clock', color: defaultColors.blue },
+  'license': { icon: 'license', color: defaultColors.yellow },
+  'license.md': { icon: 'license', color: defaultColors.yellow },
+  'license.txt': { icon: 'license', color: defaultColors.yellow },
+  'licence': { icon: 'license', color: defaultColors.yellow },
+  'copying': { icon: 'license', color: defaultColors.yellow },
+  'contributing.md': { icon: 'license', color: defaultColors.red },
+  'makefile': { icon: 'makefile', color: defaultColors.orange },
+  'cmakelists.txt': { icon: 'makefile', color: defaultColors.blue },
+  'gruntfile.js': { icon: 'grunt', color: defaultColors.orange },
+  'gulpfile.js': { icon: 'gulp', color: defaultColors.red },
+  'gulpfile.babel.js': { icon: 'gulp', color: defaultColors.red },
+  'jenkinsfile': { icon: 'jenkins', color: defaultColors.red },
+  'procfile': { icon: 'heroku', color: defaultColors.purple },
+  '.gitlab-ci.yml': { icon: 'gitlab', color: defaultColors.orange },
+  'firebase.json': { icon: 'firebase', color: defaultColors.orange },
+  '.firebaserc': { icon: 'firebase', color: defaultColors.orange },
+  'karma.conf.js': { icon: 'karma', color: defaultColors.green },
+  'todo.md': { icon: 'todo', color: defaultColors.blue },
+  'todo.txt': { icon: 'todo', color: defaultColors.blue },
+  'todo': { icon: 'todo', color: defaultColors.blue },
+  'pom.xml': { icon: 'maven', color: defaultColors.red },
+  'bower.json': { icon: 'bower', color: defaultColors.orange },
+  '.bowerrc': { icon: 'bower', color: defaultColors.orange },
+  'ionic.config.json': { icon: 'ionic', color: defaultColors.blue },
+  'platformio.ini': { icon: 'platformio', color: defaultColors.orange },
+  '.codeclimate.yml': { icon: 'code-climate', color: defaultColors.green },
+  'swagger.json': { icon: 'json', color: defaultColors.green },
+  'swagger.yml': { icon: 'json', color: defaultColors.green },
+  'swagger.yaml': { icon: 'json', color: defaultColors.green },
 };
 
-// Folder icon mappings
+// Folder icon mappings (using defaultColors)
 const folderMap = {
-  'src': colors.blue,
-  'source': colors.blue,
-  'lib': colors.blue,
-  'dist': colors.yellow,
-  'build': colors.yellow,
-  'out': colors.yellow,
-  'public': colors.green,
-  'static': colors.green,
-  'assets': colors.purple,
-  'images': colors.purple,
-  'img': colors.purple,
-  'icons': colors.purple,
-  'fonts': colors.red,
-  'styles': colors.pink,
-  'css': colors.pink,
-  'scss': colors.pink,
-  'components': colors.blue,
-  'pages': colors.green,
-  'views': colors.green,
-  'layouts': colors.orange,
-  'templates': colors.orange,
-  'utils': colors['grey-light'],
-  'helpers': colors['grey-light'],
-  'hooks': colors.blue,
-  'contexts': colors.purple,
-  'services': colors.yellow,
-  'api': colors.green,
-  'routes': colors.orange,
-  'middleware': colors.red,
-  'models': colors.red,
-  'controllers': colors.blue,
-  'config': colors['grey-light'],
-  'configs': colors['grey-light'],
-  'settings': colors['grey-light'],
-  'test': colors.orange,
-  'tests': colors.orange,
-  '__tests__': colors.orange,
-  'spec': colors.orange,
-  'specs': colors.orange,
-  'node_modules': colors.green,
-  '.git': colors.red,
-  '.github': colors.white,
-  '.vscode': colors.blue,
-  '.idea': colors.blue,
-  'vendor': colors['grey-light'],
-  'packages': colors.blue,
-  'docs': colors.blue,
-  'documentation': colors.blue,
-  'scripts': colors.yellow,
-  'bin': colors.yellow,
-  'data': colors.green,
-  'database': colors.pink,
-  'db': colors.pink,
-  'migrations': colors.orange,
-  'seeds': colors.green,
-  'logs': colors['grey-light'],
-  'tmp': colors['grey-light'],
-  'temp': colors['grey-light'],
-  'cache': colors['grey-light'],
-  '.cache': colors['grey-light'],
-  'types': colors.blue,
-  '@types': colors.blue,
-  'typings': colors.blue,
-  'interfaces': colors.blue,
-  'locales': colors.purple,
-  'i18n': colors.purple,
-  'translations': colors.purple,
-  'plugins': colors.green,
-  'modules': colors.blue,
-  'features': colors.purple,
-  'store': colors.purple,
-  'redux': colors.purple,
-  'state': colors.purple,
-  'actions': colors.orange,
-  'reducers': colors.blue,
-  'selectors': colors.green,
-  'sagas': colors.red,
-  'effects': colors.yellow,
-  'graphql': colors.pink,
-  'queries': colors.pink,
-  'mutations': colors.pink,
-  'subscriptions': colors.pink,
-  'resolvers': colors.purple,
-  'schema': colors.blue,
-  'schemas': colors.blue,
-  'electron': colors.blue,
-  'native': colors.green,
-  'android': colors.green,
-  'ios': colors['grey-light'],
-  'web': colors.blue,
-  'mobile': colors.purple,
-  'desktop': colors.blue,
-  'server': colors.green,
-  'client': colors.blue,
-  'shared': colors.purple,
-  'common': colors.purple,
-  'core': colors.red,
-  'base': colors.orange,
-  'abstract': colors.purple,
-  'entities': colors.blue,
-  'domain': colors.purple,
-  'infrastructure': colors.orange,
-  'application': colors.green,
-  'presentation': colors.blue,
-  'ui': colors.blue,
-  'widgets': colors.purple,
-  'elements': colors.blue,
-  'atoms': colors.green,
-  'molecules': colors.blue,
-  'organisms': colors.purple,
-  'mcp-tools': colors.green,
-  'python': colors.blue,
-  'projects': colors.purple,
-  'models': colors.red,
+  'src': defaultColors.blue,
+  'source': defaultColors.blue,
+  'lib': defaultColors.blue,
+  'dist': defaultColors.yellow,
+  'build': defaultColors.yellow,
+  'out': defaultColors.yellow,
+  'public': defaultColors.green,
+  'static': defaultColors.green,
+  'assets': defaultColors.purple,
+  'images': defaultColors.purple,
+  'img': defaultColors.purple,
+  'icons': defaultColors.purple,
+  'fonts': defaultColors.red,
+  'styles': defaultColors.pink,
+  'css': defaultColors.pink,
+  'scss': defaultColors.pink,
+  'components': defaultColors.blue,
+  'pages': defaultColors.green,
+  'views': defaultColors.green,
+  'layouts': defaultColors.orange,
+  'templates': defaultColors.orange,
+  'utils': defaultColors['grey-light'],
+  'helpers': defaultColors['grey-light'],
+  'hooks': defaultColors.blue,
+  'contexts': defaultColors.purple,
+  'services': defaultColors.yellow,
+  'api': defaultColors.green,
+  'routes': defaultColors.orange,
+  'middleware': defaultColors.red,
+  'models': defaultColors.red,
+  'controllers': defaultColors.blue,
+  'config': defaultColors['grey-light'],
+  'configs': defaultColors['grey-light'],
+  'settings': defaultColors['grey-light'],
+  'test': defaultColors.orange,
+  'tests': defaultColors.orange,
+  '__tests__': defaultColors.orange,
+  'spec': defaultColors.orange,
+  'specs': defaultColors.orange,
+  'node_modules': defaultColors.green,
+  '.git': defaultColors.red,
+  '.github': defaultColors.white,
+  '.vscode': defaultColors.blue,
+  '.idea': defaultColors.blue,
+  'vendor': defaultColors['grey-light'],
+  'packages': defaultColors.blue,
+  'docs': defaultColors.blue,
+  'documentation': defaultColors.blue,
+  'scripts': defaultColors.yellow,
+  'bin': defaultColors.yellow,
+  'data': defaultColors.green,
+  'database': defaultColors.pink,
+  'db': defaultColors.pink,
+  'migrations': defaultColors.orange,
+  'seeds': defaultColors.green,
+  'logs': defaultColors['grey-light'],
+  'tmp': defaultColors['grey-light'],
+  'temp': defaultColors['grey-light'],
+  'cache': defaultColors['grey-light'],
+  '.cache': defaultColors['grey-light'],
+  'types': defaultColors.blue,
+  '@types': defaultColors.blue,
+  'typings': defaultColors.blue,
+  'interfaces': defaultColors.blue,
+  'locales': defaultColors.purple,
+  'i18n': defaultColors.purple,
+  'translations': defaultColors.purple,
+  'plugins': defaultColors.green,
+  'modules': defaultColors.blue,
+  'features': defaultColors.purple,
+  'store': defaultColors.purple,
+  'redux': defaultColors.purple,
+  'state': defaultColors.purple,
+  'actions': defaultColors.orange,
+  'reducers': defaultColors.blue,
+  'selectors': defaultColors.green,
+  'sagas': defaultColors.red,
+  'effects': defaultColors.yellow,
+  'graphql': defaultColors.pink,
+  'queries': defaultColors.pink,
+  'mutations': defaultColors.pink,
+  'subscriptions': defaultColors.pink,
+  'resolvers': defaultColors.purple,
+  'schema': defaultColors.blue,
+  'schemas': defaultColors.blue,
+  'electron': defaultColors.blue,
+  'native': defaultColors.green,
+  'android': defaultColors.green,
+  'ios': defaultColors['grey-light'],
+  'web': defaultColors.blue,
+  'mobile': defaultColors.purple,
+  'desktop': defaultColors.blue,
+  'server': defaultColors.green,
+  'client': defaultColors.blue,
+  'shared': defaultColors.purple,
+  'common': defaultColors.purple,
+  'core': defaultColors.red,
+  'base': defaultColors.orange,
+  'abstract': defaultColors.purple,
+  'entities': defaultColors.blue,
+  'domain': defaultColors.purple,
+  'infrastructure': defaultColors.orange,
+  'application': defaultColors.green,
+  'presentation': defaultColors.blue,
+  'ui': defaultColors.blue,
+  'widgets': defaultColors.purple,
+  'elements': defaultColors.blue,
+  'atoms': defaultColors.green,
+  'molecules': defaultColors.blue,
+  'organisms': defaultColors.purple,
+  'mcp-tools': defaultColors.green,
+  'python': defaultColors.blue,
+  'projects': defaultColors.purple,
+  'models': defaultColors.red,
 };
 
 // SVG cache
@@ -510,15 +549,16 @@ const loadSvg = async (iconName) => {
   }
 };
 
-// Get icon info for a file
-const getFileIconInfo = (filename) => {
+// Get icon info for a file (with colorblind-aware colors)
+const getFileIconInfo = (filename, colors) => {
   if (!filename) return { icon: 'default', color: colors.white };
   
   const lowerName = filename.toLowerCase();
   
-  // Check special filenames first
+  // Check special filenames first - remap colors
   if (filenameMap[lowerName]) {
-    return filenameMap[lowerName];
+    const mapped = filenameMap[lowerName];
+    return { icon: mapped.icon, color: remapColor(mapped.color, colors) };
   }
   
   // Check for d.ts files
@@ -537,20 +577,41 @@ const getFileIconInfo = (filename) => {
     }
   }
   
-  // Get extension
+  // Get extension - remap colors
   const ext = lowerName.split('.').pop();
   if (extensionMap[ext]) {
-    return extensionMap[ext];
+    const mapped = extensionMap[ext];
+    return { icon: mapped.icon, color: remapColor(mapped.color, colors) };
   }
   
   return { icon: 'default', color: colors.white };
 };
 
-// Get folder color
-const getFolderColor = (foldername) => {
+// Remap default color to colorblind-aware color
+const remapColor = (originalColor, colors) => {
+  // Map original default colors to current palette
+  const colorMap = {
+    [defaultColors.red]: colors.red,
+    [defaultColors.green]: colors.green,
+    [defaultColors.blue]: colors.blue,
+    [defaultColors.yellow]: colors.yellow,
+    [defaultColors.orange]: colors.orange,
+    [defaultColors.pink]: colors.pink,
+    [defaultColors.purple]: colors.purple,
+    [defaultColors.grey]: colors.grey,
+    [defaultColors['grey-light']]: colors['grey-light'],
+    [defaultColors.white]: colors.white,
+    [defaultColors.ignore]: colors.ignore,
+  };
+  return colorMap[originalColor] || originalColor;
+};
+
+// Get folder color (with colorblind-aware colors)
+const getFolderColor = (foldername, colors) => {
   if (!foldername) return colors['grey-light'];
   const lowerName = foldername.toLowerCase();
-  return folderMap[lowerName] || colors['grey-light'];
+  const originalColor = folderMap[lowerName] || defaultColors['grey-light'];
+  return remapColor(originalColor, colors);
 };
 
 // Preloaded SVGs for common icons (inline for instant rendering)
@@ -564,13 +625,17 @@ import { useState, useEffect } from 'react';
 
 const FileIcon = memo(({ filename, isFolder = false, isOpen = false, size = 16 }) => {
   const [svgContent, setSvgContent] = useState(null);
+  const { colorblindMode } = useTheme();
+  
+  // Get colors based on colorblind mode
+  const colors = useMemo(() => getColors(colorblindMode), [colorblindMode]);
   
   const iconInfo = useMemo(() => {
     if (isFolder) {
-      return { icon: 'folder', color: getFolderColor(filename) };
+      return { icon: 'folder', color: getFolderColor(filename, colors) };
     }
-    return getFileIconInfo(filename);
-  }, [filename, isFolder]);
+    return getFileIconInfo(filename, colors);
+  }, [filename, isFolder, colors]);
 
   useEffect(() => {
     let mounted = true;

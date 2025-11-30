@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Settings, Cpu, Globe, ChevronRight, Check, Loader2, Sun, Moon } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
+import { X, Settings, Cpu, Globe, ChevronRight, Check, Loader2, Sun, Moon, Eye } from 'lucide-react';
+import { useTheme, colorblindModes } from '../contexts/ThemeContext';
 
 const TABS = [
   { id: 'general', name: 'General', icon: Settings },
@@ -34,10 +34,10 @@ const INFERENCE_PROVIDERS = [
 ];
 
 const GeneralSettings = () => {
-  const { theme, themeName, setTheme, isDark } = useTheme();
+  const { theme, themeName, setTheme, isDark, colorblindMode, setColorblindMode } = useTheme();
   
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Theme Selection */}
       <div>
         <label style={{ 
@@ -122,6 +122,101 @@ const GeneralSettings = () => {
           </div>
         </div>
       </div>
+
+      {/* Colorblind Mode Selection */}
+      <div>
+        <label style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#aaa', 
+          fontSize: '0.85rem',
+          marginBottom: '8px',
+          fontWeight: '500'
+        }}>
+          <Eye size={16} />
+          Color Vision Accessibility
+          <span style={{
+            background: 'rgba(245, 158, 11, 0.2)',
+            color: '#f59e0b',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            fontSize: '0.65rem',
+            fontWeight: 600
+          }}>
+            EXPERIMENTAL
+          </span>
+        </label>
+        <p style={{ 
+          color: '#888', 
+          fontSize: '0.75rem', 
+          margin: '0 0 12px 0',
+          lineHeight: 1.4
+        }}>
+          ⚠️ This feature is experimental and may not cover all UI elements yet.
+        </p>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {Object.entries(colorblindModes).map(([key, mode]) => {
+            const isSelected = colorblindMode === key;
+            return (
+              <div
+                key={key}
+                onClick={() => setColorblindMode(key)}
+                style={{
+                  padding: '12px 16px',
+                  background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.03)',
+                  border: isSelected ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {/* Color Preview */}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <div style={{ 
+                    width: '16px', 
+                    height: '16px', 
+                    borderRadius: '4px', 
+                    background: mode.colors.error,
+                    border: '1px solid rgba(255,255,255,0.2)'
+                  }} title="Error" />
+                  <div style={{ 
+                    width: '16px', 
+                    height: '16px', 
+                    borderRadius: '4px', 
+                    background: mode.colors.success,
+                    border: '1px solid rgba(255,255,255,0.2)'
+                  }} title="Success" />
+                  <div style={{ 
+                    width: '16px', 
+                    height: '16px', 
+                    borderRadius: '4px', 
+                    background: mode.colors.warning,
+                    border: '1px solid rgba(255,255,255,0.2)'
+                  }} title="Warning" />
+                </div>
+                
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: '#fff', fontSize: '0.9rem', fontWeight: '500' }}>
+                    {mode.name}
+                  </div>
+                  <div style={{ color: '#888', fontSize: '0.75rem' }}>
+                    {mode.description}
+                  </div>
+                </div>
+                
+                {isSelected && (
+                  <Check size={18} style={{ color: '#6366f1' }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
       
       <div style={{ 
         padding: '12px 16px', 
@@ -130,7 +225,7 @@ const GeneralSettings = () => {
         border: '1px solid rgba(99, 102, 241, 0.2)'
       }}>
         <p style={{ color: '#a5b4fc', fontSize: '0.85rem', margin: 0 }}>
-          💡 Theme changes are applied immediately and saved automatically.
+          💡 Changes are applied immediately and saved automatically.
         </p>
       </div>
     </div>

@@ -1,12 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Minus, Square, X, PanelRight, ChevronRight } from 'lucide-react';
 import DonationButton from './DonationButton';
 import { useTheme } from '../contexts/ThemeContext';
 
-const TitleBar = ({ isIDEMode, showIDEChat, onToggleIDEChat, onIDEAction }) => {
-    const { theme, isDark } = useTheme();
+const TitleBar = ({ isIDEMode, showIDEChat, onToggleIDEChat, onIDEAction, projectPath }) => {
+    const { theme } = useTheme();
     const [isMaximized, setIsMaximized] = useState(false);
     const [activeMenu, setActiveMenu] = useState(null);
+    const [visibleMenuCount, setVisibleMenuCount] = useState(7); // All menus visible by default
     const menuRef = useRef(null);
 
     const handleMinimize = () => {
@@ -32,6 +33,27 @@ const TitleBar = ({ isIDEMode, showIDEChat, onToggleIDEChat, onIDEAction }) => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // Calculate how many menu items can fit before the search bar
+    useEffect(() => {
+        if (!isIDEMode) return;
+        
+        const calculateVisibleMenus = () => {
+            const windowWidth = window.innerWidth;
+            // Search bar is centered, so we have (windowWidth / 2) - (searchBarWidth / 2) space on the left
+            // Search bar is ~400px wide, so center point minus 200px
+            // Menu bar starts at ~80px (OpenMind title), each menu item is ~60px
+            const availableWidth = (windowWidth / 2) - 220; // 200 for half search bar + 20 margin
+            const menuItemWidth = 65; // Average width per menu item
+            const titleWidth = 90; // OpenMind title width
+            const maxMenus = Math.floor((availableWidth - titleWidth) / menuItemWidth);
+            setVisibleMenuCount(Math.max(0, Math.min(7, maxMenus)));
+        };
+        
+        calculateVisibleMenus();
+        window.addEventListener('resize', calculateVisibleMenus);
+        return () => window.removeEventListener('resize', calculateVisibleMenus);
+    }, [isIDEMode]);
 
     // Handle menu item click
     const handleMenuAction = useCallback((action) => {
@@ -403,6 +425,48 @@ const TitleBar = ({ isIDEMode, showIDEChat, onToggleIDEChat, onIDEAction }) => {
                     <span style={{ fontWeight: 600, color: '#ececec' }}>OpenMind</span>
                 )}
             </div>
+
+            {/* Center Search Bar (IDE Mode only) */}
+            {isIDEMode && visibleMenuCount > 2 && (
+                <div style={{
+                    position: 'absolute',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    WebkitAppRegion: 'no-drag'
+                }}>
+                    <div
+                        onClick={() => onIDEAction?.('commandPalette')}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(255,255,255,0.06)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '6px',
+                            padding: '4px 40px',
+                            cursor: 'pointer',
+                            width: visibleMenuCount >= 7 ? '400px' : visibleMenuCount >= 5 ? '300px' : '200px',
+                            transition: 'background 0.15s, border-color 0.15s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+                            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                        }}
+                    >
+                        <span style={{
+                            color: theme.textSecondary,
+                            fontSize: '0.8rem',
+                            userSelect: 'none'
+                        }}>
+                            {projectPath ? projectPath.split(/[/\\]/).pop() : 'OpenMind'}
+                        </span>
+                    </div>
+                </div>
+            )}
 
             {/* Donation + Window Controls */}
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', paddingRight: '16px', gap: '12px', WebkitAppRegion: 'no-drag' }}>

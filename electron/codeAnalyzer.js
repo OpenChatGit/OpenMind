@@ -161,10 +161,36 @@ function checkPatterns(code, patterns) {
   return problems;
 }
 
+// Files that should not be analyzed
+const skipFiles = new Set([
+  'license', 'licence', 'copying', 'readme', 'changelog', 'changes',
+  'authors', 'contributors', 'todo', 'notes', 'history', 'news',
+  'makefile', 'gemfile', 'procfile', 'vagrantfile', 'brewfile'
+]);
+
+// Extensions that should not be analyzed
+const skipExtensions = new Set([
+  '.txt', '.log', '.md', '.mdx', '.rst', '.text',
+  '.gitignore', '.gitattributes', '.npmignore', '.dockerignore',
+  '.env', '.editorconfig', '.prettierignore', '.eslintignore'
+]);
+
 // Main analysis function
 function analyzeFile(filePath, content) {
   const problems = [];
   const ext = path.extname(filePath).toLowerCase();
+  const basename = path.basename(filePath).toLowerCase();
+  const basenameNoExt = path.basename(filePath, ext).toLowerCase();
+  
+  // Skip non-code files
+  if (skipFiles.has(basename) || skipFiles.has(basenameNoExt)) {
+    return problems;
+  }
+  
+  // Skip certain extensions
+  if (skipExtensions.has(ext) || skipExtensions.has(basename)) {
+    return problems;
+  }
   
   // JSON files
   if (ext === '.json') {
@@ -173,7 +199,7 @@ function analyzeFile(filePath, content) {
   }
   
   // JavaScript/TypeScript
-  if (['.js', '.jsx', '.ts', '.tsx', '.mjs'].includes(ext)) {
+  if (['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'].includes(ext)) {
     problems.push(...checkBrackets(content, filePath));
     problems.push(...checkPatterns(content, jsPatterns));
     return problems;
@@ -186,9 +212,19 @@ function analyzeFile(filePath, content) {
     return problems;
   }
   
-  // Other files - just check brackets
-  problems.push(...checkBrackets(content, filePath));
+  // HTML/CSS - only check brackets
+  if (['.html', '.htm', '.css', '.scss', '.less'].includes(ext)) {
+    problems.push(...checkBrackets(content, filePath));
+    return problems;
+  }
   
+  // Other code files - check brackets
+  if (['.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala'].includes(ext)) {
+    problems.push(...checkBrackets(content, filePath));
+    return problems;
+  }
+  
+  // Don't analyze unknown file types
   return problems;
 }
 

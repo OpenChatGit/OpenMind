@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Code2, X, FilePlus, FolderPlus, RefreshCw, ChevronsDownUp, MoreHorizontal, Play, File, FolderOpen, Plus, Folder, Eye } from 'lucide-react';
+import { Code2, X, FilePlus, FolderPlus, RefreshCw, ChevronsDownUp, MoreHorizontal, Play, File, FolderOpen, Plus, Folder, Eye, Sparkles } from 'lucide-react';
 import FileExplorer from './FileExplorer';
 import { useTheme } from '../contexts/ThemeContext';
 import CodeEditor from './CodeEditor';
@@ -7,9 +7,10 @@ import MarkdownPreview from './MarkdownPreview';
 import FileIcon from './FileIcon';
 import ExtensionsPanel from './ExtensionsPanel';
 import TerminalPanel from './TerminalPanel';
+import WelcomeTab from './WelcomeTab';
 import { getHighlightParts } from '../utils/searchUtils';
 
-const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusChange }, ref) => {
+const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusChange, onWorkspaceChange }, ref) => {
   const { theme, isDark } = useTheme();
   const fileExplorerRef = useRef(null);
   const codeEditorRef = useRef(null);
@@ -78,6 +79,26 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
     loadRecentProjects();
   }, [loadRecentProjects]);
 
+  // Auto-open Welcome tab on first launch
+  useEffect(() => {
+    const hasSeenWelcome = localStorage.getItem('openmind-welcome-seen');
+    if (!hasSeenWelcome) {
+      // Open welcome tab on first launch
+      const welcomeTabId = 'welcome:openmind';
+      const newTab = {
+        id: welcomeTabId,
+        name: 'Welcome',
+        path: null,
+        modified: false,
+        type: 'welcome'
+      };
+      setOpenTabs([newTab]);
+      setActiveTab(welcomeTabId);
+      localStorage.setItem('openmind-welcome-seen', 'true');
+      localStorage.setItem('openmind-seen-v0.3.0', 'true');
+    }
+  }, []);
+
   // Save workspace folder to localStorage when it changes
   useEffect(() => {
     if (workspaceFolder) {
@@ -87,7 +108,9 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
       localStorage.removeItem('ide-workspace-folder');
       setGitInfo({ isRepo: false, branch: '' });
     }
-  }, [workspaceFolder, checkGitStatus]);
+    // Notify parent about workspace change
+    onWorkspaceChange?.(workspaceFolder);
+  }, [workspaceFolder, checkGitStatus, onWorkspaceChange]);
 
   // Report status changes to parent
   useEffect(() => {
@@ -252,13 +275,25 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
     handleFileOpen(item, true);
   };
 
-  // Handle code changes - memoized to prevent unnecessary re-renders
+  // Track if tab is already marked as modified to avoid unnecessary updates
+  const modifiedTabsRef = useRef(new Set());
+  
+  // Handle code changes - optimized to minimize re-renders
   const handleCodeChange = useCallback((filePath, newContent) => {
-    setFileContents(prev => ({ ...prev, [filePath]: newContent }));
-    // Mark tab as modified
-    setOpenTabs(prev => prev.map(tab => 
-      tab.path === filePath ? { ...tab, modified: true } : tab
-    ));
+    // Update file contents
+    setFileContents(prev => {
+      // Skip if content hasn't changed
+      if (prev[filePath] === newContent) return prev;
+      return { ...prev, [filePath]: newContent };
+    });
+    
+    // Only update tabs if not already marked as modified
+    if (!modifiedTabsRef.current.has(filePath)) {
+      modifiedTabsRef.current.add(filePath);
+      setOpenTabs(prev => prev.map(tab => 
+        tab.path === filePath ? { ...tab, modified: true } : tab
+      ));
+    }
     
     // Debounced code analysis
     if (analysisTimerRef.current) {
@@ -266,7 +301,7 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
     }
     analysisTimerRef.current = setTimeout(() => {
       analyzeCode(filePath, newContent);
-    }, 500); // 500ms debounce
+    }, 800); // Increased debounce to 800ms for better performance
   }, [analyzeCode]);
 
   // Save file - memoized
@@ -275,6 +310,8 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
     if (content !== undefined) {
       const result = await window.electronAPI?.ideSaveFile(filePath, content);
       if (result?.success) {
+        // Remove from modified tracking
+        modifiedTabsRef.current.delete(filePath);
         // Remove modified indicator
         setOpenTabs(prev => prev.map(tab => 
           tab.path === filePath ? { ...tab, modified: false } : tab
@@ -504,7 +541,26 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
     },
     clearProblems: () => setProblems([]),
     clearOutput: () => setOutputLogs([]),
-    clearDebug: () => setDebugLogs([])
+    clearDebug: () => setDebugLogs([]),
+    openWelcomeTab: () => {
+      const welcomeTabId = 'welcome:openmind';
+      // Check if already open
+      const existingTab = openTabs.find(t => t.id === welcomeTabId);
+      if (existingTab) {
+        setActiveTab(welcomeTabId);
+        return;
+      }
+      // Create new welcome tab
+      const newTab = {
+        id: welcomeTabId,
+        name: 'Welcome',
+        path: null,
+        modified: false,
+        type: 'welcome'
+      };
+      setOpenTabs(prev => [...prev, newTab]);
+      setActiveTab(welcomeTabId);
+    }
   }), [activeTab, fileContents, openTabs, workspaceFolder, handleOpenFolder, handleSaveCurrentTab, handleCloseCurrentTab, handleSaveFile, editorAction]);
 
   // Note: Keyboard shortcuts are handled in App.jsx for global IDE shortcuts
@@ -1399,14 +1455,15 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
         flexDirection: 'column',
         minWidth: 0
       }}>
-        {/* Tab Bar */}
+        {/* Tab Bar - Browser Style */}
         <div style={{
-          height: '35px',
+          height: '38px',
           background: theme.bgSecondary,
-          borderBottom: `1px solid ${theme.border}`,
           display: 'flex',
-          alignItems: 'stretch',
-          overflowX: 'auto'
+          alignItems: 'flex-end',
+          overflowX: 'auto',
+          padding: '0 8px',
+          gap: '2px'
         }}>
           {openTabs.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -1420,25 +1477,31 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
                 onMouseEnter={() => setHoveredTab(tab.id)}
                 onMouseLeave={() => setHoveredTab(null)}
                 style={{
-                  padding: '0 12px',
-                  background: isActive ? theme.bg : 'transparent',
-                  borderTop: isActive ? '1px solid #6366f1' : '1px solid transparent',
-                  borderRight: `1px solid ${theme.borderLight}`,
+                  padding: '7px 12px',
+                  background: isActive 
+                    ? 'linear-gradient(to bottom, #2a2a2a 0%, #1e1e1e 100%)' 
+                    : (isHovered ? '#333' : '#2a2a2a'),
+                  borderRadius: '8px 8px 0 0',
                   fontSize: '0.8rem',
                   color: isActive ? theme.text : theme.textSecondary,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
+                  gap: '8px',
                   cursor: 'pointer',
                   transition: 'background 0.15s',
                   minWidth: 'fit-content',
-                  position: 'relative'
+                  position: 'relative',
+                  marginBottom: isActive ? '0' : '2px',
+                  border: isActive ? '1px solid #3a3a3a' : '1px solid transparent',
+                  borderBottom: isActive ? 'none' : '1px solid transparent'
                 }}
               >
-                {isPreview ? (
+                {tab.type === 'welcome' ? (
+                  <Sparkles size={14} style={{ color: '#6366f1' }} />
+                ) : isPreview ? (
                   <Eye size={14} style={{ color: '#6366f1' }} />
                 ) : (
-                  <FileIcon filename={tab.filename} size={14} />
+                  <FileIcon filename={tab.name} size={16} />
                 )}
                 <span style={{ whiteSpace: 'nowrap' }}>
                   {tab.modified ? '● ' : ''}{tab.name}
@@ -1479,6 +1542,9 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
             );
           })}
         </div>
+        
+        {/* Separator line between tabs and editor */}
+        <div style={{ height: '1px', background: theme.border }} />
 
         {/* Editor Content */}
         <div style={{
@@ -1660,6 +1726,21 @@ const IDEMode = forwardRef(({ activePanel, isSidePanelVisible = true, onStatusCh
                 </div>
               </div>
             )
+          ) : openTabs.find(t => t.id === activeTab)?.type === 'welcome' ? (
+            <WelcomeTab
+              recentProjects={recentProjects}
+              onAction={(action, data) => {
+                if (action === 'openFolder') handleOpenFolder();
+                else if (action === 'newFile') fileExplorerRef.current?.startNewFile();
+                else if (action === 'openProject' && data) {
+                  setWorkspaceFolder(data);
+                  setExplorerKey(prev => prev + 1);
+                }
+                else if (action === 'openSettings') {
+                  // Trigger settings from parent - would need to be passed down
+                }
+              }}
+            />
           ) : openTabs.find(t => t.id === activeTab)?.type === 'preview' ? (
             <MarkdownPreview
               content={fileContents[activeTab] || ''}

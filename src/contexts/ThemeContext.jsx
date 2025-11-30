@@ -1,5 +1,74 @@
 import { createContext, useContext, useState, useEffect, useMemo } from 'react';
 
+// Colorblind-friendly color palettes
+export const colorblindModes = {
+  none: {
+    name: 'None',
+    description: 'Default colors',
+    colors: {
+      error: '#ef4444',      // Red
+      success: '#10b981',    // Green
+      warning: '#f59e0b',    // Yellow/Orange
+      info: '#3b82f6',       // Blue
+      errorBg: 'rgba(239, 68, 68, 0.15)',
+      successBg: 'rgba(16, 185, 129, 0.15)',
+      warningBg: 'rgba(245, 158, 11, 0.15)',
+    }
+  },
+  deuteranopia: {
+    name: 'Deuteranopia',
+    description: 'Red-Green (most common)',
+    colors: {
+      error: '#d55e00',      // Orange-Red (distinguishable)
+      success: '#0072b2',    // Blue (instead of green)
+      warning: '#f0e442',    // Yellow
+      info: '#56b4e9',       // Light Blue
+      errorBg: 'rgba(213, 94, 0, 0.15)',
+      successBg: 'rgba(0, 114, 178, 0.15)',
+      warningBg: 'rgba(240, 228, 66, 0.15)',
+    }
+  },
+  protanopia: {
+    name: 'Protanopia',
+    description: 'Red-Green (red weak)',
+    colors: {
+      error: '#e69f00',      // Orange
+      success: '#0072b2',    // Blue (instead of green)
+      warning: '#f0e442',    // Yellow
+      info: '#56b4e9',       // Light Blue
+      errorBg: 'rgba(230, 159, 0, 0.15)',
+      successBg: 'rgba(0, 114, 178, 0.15)',
+      warningBg: 'rgba(240, 228, 66, 0.15)',
+    }
+  },
+  tritanopia: {
+    name: 'Tritanopia',
+    description: 'Blue-Yellow',
+    colors: {
+      error: '#d55e00',      // Orange-Red
+      success: '#009e73',    // Teal
+      warning: '#cc79a7',    // Pink
+      info: '#999999',       // Gray
+      errorBg: 'rgba(213, 94, 0, 0.15)',
+      successBg: 'rgba(0, 158, 115, 0.15)',
+      warningBg: 'rgba(204, 121, 167, 0.15)',
+    }
+  },
+  monochromacy: {
+    name: 'Monochromacy',
+    description: 'Complete color blindness',
+    colors: {
+      error: '#666666',      // Dark Gray
+      success: '#aaaaaa',    // Light Gray
+      warning: '#888888',    // Medium Gray
+      info: '#cccccc',       // Very Light Gray
+      errorBg: 'rgba(102, 102, 102, 0.15)',
+      successBg: 'rgba(170, 170, 170, 0.15)',
+      warningBg: 'rgba(136, 136, 136, 0.15)',
+    }
+  }
+};
+
 // Theme definitions
 export const themes = {
   dark: {
@@ -93,7 +162,27 @@ export const ThemeProvider = ({ children }) => {
     return localStorage.getItem('app-theme') || 'dark';
   });
 
-  const theme = useMemo(() => themes[themeName] || themes.dark, [themeName]);
+  const [colorblindMode, setColorblindMode] = useState(() => {
+    return localStorage.getItem('colorblind-mode') || 'none';
+  });
+
+  // Merge theme with colorblind colors
+  const theme = useMemo(() => {
+    const baseTheme = themes[themeName] || themes.dark;
+    const cbColors = colorblindModes[colorblindMode]?.colors || colorblindModes.none.colors;
+    
+    return {
+      ...baseTheme,
+      // Override semantic colors with colorblind-friendly versions
+      error: cbColors.error,
+      success: cbColors.success,
+      warning: cbColors.warning,
+      info: cbColors.info,
+      errorBg: cbColors.errorBg,
+      successBg: cbColors.successBg,
+      warningBg: cbColors.warningBg,
+    };
+  }, [themeName, colorblindMode]);
 
   useEffect(() => {
     localStorage.setItem('app-theme', themeName);
@@ -102,7 +191,15 @@ export const ThemeProvider = ({ children }) => {
     document.documentElement.style.setProperty('--bg-secondary', theme.bgSecondary);
     document.documentElement.style.setProperty('--text', theme.text);
     document.documentElement.style.setProperty('--border', theme.border);
+    // Colorblind colors as CSS variables
+    document.documentElement.style.setProperty('--error', theme.error);
+    document.documentElement.style.setProperty('--success', theme.success);
+    document.documentElement.style.setProperty('--warning', theme.warning);
   }, [themeName, theme]);
+
+  useEffect(() => {
+    localStorage.setItem('colorblind-mode', colorblindMode);
+  }, [colorblindMode]);
 
   const toggleTheme = () => {
     setThemeName(prev => prev === 'dark' ? 'light' : 'dark');
@@ -113,8 +210,11 @@ export const ThemeProvider = ({ children }) => {
     themeName,
     setTheme: setThemeName,
     toggleTheme,
-    isDark: themeName === 'dark'
-  }), [theme, themeName]);
+    isDark: themeName === 'dark',
+    colorblindMode,
+    setColorblindMode,
+    colorblindModes
+  }), [theme, themeName, colorblindMode]);
 
   return (
     <ThemeContext.Provider value={value}>
