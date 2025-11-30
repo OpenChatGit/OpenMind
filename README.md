@@ -201,9 +201,19 @@ The reasoning is shown in a collapsible "Reasoning" section above the response.
 
 ## IDE Mode (v1 - Beta)
 
-OpenMind includes a built-in IDE mode for coding directly within the app. Click the **Code** button in the sidebar to switch to IDE mode.
+OpenMind includes a built-in IDE mode designed to feel familiar to VS Code users. If you know VS Code, you already know how to use OpenMind IDE. Click the **Code** button in the sidebar to switch to IDE mode.
 
 > ⚠️ **Note:** IDE Mode is currently in v1 (Beta). Some features may be incomplete or have bugs. We're actively improving it!
+
+### VS Code-Style Experience
+
+The IDE is designed to match VS Code's look and feel:
+
+- 🎨 **Seti UI File Icons** - The same icon theme used by VS Code
+- � **Faamiliar File Explorer** - Same layout and behavior as VS Code
+- ⌨️ **Same Keyboard Shortcuts** - Ctrl+S, Ctrl+W, Ctrl+B work as expected
+- 🎯 **Monaco Editor** - The same editor engine that powers VS Code
+- 🌙 **Dark Theme** - Comfortable for long coding sessions
 
 ### IDE Features
 
@@ -211,10 +221,9 @@ OpenMind includes a built-in IDE mode for coding directly within the app. Click 
 - 📝 **Code Editor** - Syntax highlighting for 30+ languages (JS, TS, Python, etc.)
 - 🗂️ **Tab Management** - Multiple open files with unsaved changes indicator
 - 🔍 **Search in Files** - VS Code-style search with regex support
-- 💬 **Integrated AI Chat** - Ask questions about your code in the sidebar
-- ⌨️ **Keyboard Shortcuts** - Ctrl+S (save), Ctrl+W (close tab), etc.
-- 📄 **Markdown Preview** - Preview .md files with syntax highlighting
-- 🎨 **VS Code Icons** - Familiar file/folder icons
+- � **Integratted Terminal** - Full terminal with PowerShell/Bash support
+- �  **Integrated AI Chat** - Ask questions about your code in the sidebar
+- � ***Markdown Preview** - Preview .md files with syntax highlighting
 - 🔄 **Project Management** - Create new projects or open existing folders
 
 ### IDE Keyboard Shortcuts
@@ -230,32 +239,12 @@ OpenMind includes a built-in IDE mode for coding directly within the app. Click 
 ### Known Limitations (v1)
 
 - Git integration is read-only (shows branch name only)
-- No terminal integration yet
 - Extensions panel is placeholder
 - Debug panel is placeholder
 
-## Recent Changes
+## Changelog
 
-### IDE Mode (NEW!)
-- ✅ **Built-in IDE** - VS Code-style code editor integrated into the app
-- ✅ **File Explorer** - Full file system navigation with context menus
-- ✅ **Syntax Highlighting** - Support for 30+ programming languages
-- ✅ **AI Chat Sidebar** - Ask questions about your code while editing
-- ✅ **Search in Files** - Find text across your entire project
-- ✅ **Tab Management** - Multiple files with unsaved changes tracking
-- ✅ **Markdown Preview** - Preview markdown files with styling
-- ✅ **Performance Optimized** - Memoized components to prevent unnecessary re-renders
-
-### Image Generation Improvements
-- ✅ **CUDA/GPU Support** - Fast image generation with NVIDIA GPUs
-- ✅ **Automatic CUDA setup** - `node scripts/setup-python.js --cuda`
-- ✅ **Fullscreen image viewer** - Click generated images to view fullscreen (ESC to close)
-- ✅ **Better CUDA detection** - UI now correctly shows GPU status
-- ✅ **GGUF model support** - Use quantized models for smaller file sizes
-
-### UI Improvements
-- ✅ **Hover effects on images** - Visual feedback when hovering over generated images
-- ✅ **ESC key support** - Close fullscreen with keyboard
+See [CHANGELOG.md](CHANGELOG.md) for recent updates and version history.
 
 ## License
 
