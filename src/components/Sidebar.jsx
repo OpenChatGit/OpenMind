@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Sparkles, Code2, MessageSquare } from 'lucide-react';
+import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Sparkles } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const Sidebar = ({
@@ -14,9 +14,7 @@ const Sidebar = ({
   onOpenLoginModal,
   onHfLogout,
   onOpenModelCreator,
-  onOpenSettings,
-  onOpenIDE,
-  isIDEMode
+  onOpenSettings
 }) => {
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -61,6 +59,7 @@ const Sidebar = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -143,30 +142,6 @@ const Sidebar = ({
         >
           <Plus size={15} />
           <span>New Chat</span>
-        </div>
-
-        <div
-          onClick={onOpenIDE}
-          style={{
-            padding: '6px 10px',
-            background: isIDEMode ? 'rgba(99, 102, 241, 0.2)' : theme.bgActive,
-            borderRadius: '8px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            transition: 'background 0.2s',
-            fontSize: '0.85rem',
-            fontWeight: '500',
-            color: isIDEMode ? '#6366f1' : theme.text,
-            WebkitAppRegion: 'no-drag',
-            border: isIDEMode ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid transparent'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = isIDEMode ? 'rgba(99, 102, 241, 0.3)' : theme.bgHover}
-          onMouseLeave={(e) => e.currentTarget.style.background = isIDEMode ? 'rgba(99, 102, 241, 0.2)' : theme.bgActive}
-          title={isIDEMode ? "Back to Chat" : "IDE Mode"}
-        >
-          {isIDEMode ? <MessageSquare size={15} /> : <Code2 size={15} />}
         </div>
 
         <button
@@ -424,7 +399,7 @@ const Sidebar = ({
             flex: 1, 
             fontSize: '0.9rem', 
             fontWeight: '500', 
-            color: hfUser ? '#ececec' : '#888',
+            color: hfUser ? theme.text : theme.textSecondary,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -443,8 +418,8 @@ const Sidebar = ({
             left: '0',
             right: '0',
             marginBottom: '4px',
-            background: '#2f2f2f',
-            border: '1px solid rgba(255,255,255,0.1)',
+            background: theme.bgSecondary,
+            border: `1px solid ${theme.border}`,
             borderRadius: '8px',
             padding: '4px',
             zIndex: 100,
@@ -510,13 +485,13 @@ const Sidebar = ({
                 padding: '8px 12px',
                 background: 'transparent',
                 border: 'none',
-                color: '#ececec',
+                color: theme.text,
                 cursor: 'pointer',
                 borderRadius: '4px',
                 fontSize: '0.85rem',
                 textAlign: 'left'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseEnter={(e) => e.currentTarget.style.background = theme.bgHover}
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
               <Sparkles size={14} />
@@ -535,13 +510,13 @@ const Sidebar = ({
                 padding: '8px 12px',
                 background: 'transparent',
                 border: 'none',
-                color: '#ececec',
+                color: theme.text,
                 cursor: 'pointer',
                 borderRadius: '4px',
                 fontSize: '0.85rem',
                 textAlign: 'left'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseEnter={(e) => e.currentTarget.style.background = theme.bgHover}
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
               <Settings size={14} />
@@ -550,7 +525,6 @@ const Sidebar = ({
           </div>
         )}
       </div>
-
     </div>
   );
 };

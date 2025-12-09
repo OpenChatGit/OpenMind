@@ -7,6 +7,28 @@
   --chat-bg: rgba(255, 255, 255, 0.05);
   --accent-color: #ffffff;
   --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+  
+  /* Theme colors (dynamically set by ThemeContext) */
+  --bg: #151517;
+  --bg-secondary: #1b1b1c;
+  --bg-tertiary: #1e1e1e;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --text: #e0e0e0;
+  --text-secondary: #888;
+  --text-muted: #666;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-light: rgba(255, 255, 255, 0.05);
+  --accent: #ffffff;
+  
+  /* Semantic colors (colorblind-aware, dynamically set) */
+  --error: #ef4444;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+  --error-bg: rgba(239, 68, 68, 0.15);
+  --success-bg: rgba(16, 185, 129, 0.15);
+  --warning-bg: rgba(245, 158, 11, 0.15);
 }
 
 *,

@@ -1,15 +1,187 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import TitleBar from './components/TitleBar';
 import LoginModal from './components/LoginModal';
 import ModelCreator from './components/ModelCreator';
 import SettingsModal from './components/SettingsModal';
-import IDEMode from './components/IDEMode';
-import IDEChatSidebar from './components/IDEChatSidebar';
-import IDEActivityBar from './components/IDEActivityBar';
 import { useTheme } from './contexts/ThemeContext';
-import { PanelLeft, MessageSquare } from 'lucide-react';
+import { PanelLeft, Volume2, VolumeX } from 'lucide-react';
+
+// Audio analyzer hook for reactive visuals - returns frequency data for wave effect
+const useAudioAnalyzer = (audioRef, enabled) => {
+  const [frequencyData, setFrequencyData] = useState(new Array(32).fill(0));
+  const analyzerRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const sourceRef = useRef(null);
+  const animationRef = useRef(null);
+  const isSetupRef = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || !audioRef.current) {
+      setFrequencyData(new Array(32).fill(0));
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      return;
+    }
+
+    const audio = audioRef.current;
+    let dataArray;
+
+    const startAnalyzing = () => {
+      if (!analyzerRef.current) return;
+      
+      const updateLevel = () => {
+        if (!analyzerRef.current || !enabled) return;
+        analyzerRef.current.getByteFrequencyData(dataArray);
+        const normalized = Array.from(dataArray).map(v => v / 255);
+        setFrequencyData(normalized);
+        animationRef.current = requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+    };
+
+    const setupAnalyzer = () => {
+      if (isSetupRef.current) {
+        // Already setup, just start analyzing
+        if (audioContextRef.current?.state === 'suspended') {
+          audioContextRef.current.resume();
+        }
+        startAnalyzing();
+        return;
+      }
+
+      try {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        analyzerRef.current = audioContextRef.current.createAnalyser();
+        analyzerRef.current.fftSize = 128;
+        analyzerRef.current.smoothingTimeConstant = 0.7;
+        sourceRef.current = audioContextRef.current.createMediaElementSource(audio);
+        sourceRef.current.connect(analyzerRef.current);
+        analyzerRef.current.connect(audioContextRef.current.destination);
+        dataArray = new Uint8Array(analyzerRef.current.frequencyBinCount);
+        isSetupRef.current = true;
+        startAnalyzing();
+      } catch (e) {
+        console.log('Audio analyzer setup failed:', e);
+      }
+    };
+
+    // Setup immediately if audio is already playing
+    if (!audio.paused) {
+      setupAnalyzer();
+    }
+
+    audio.addEventListener('play', setupAnalyzer);
+
+    return () => {
+      audio.removeEventListener('play', setupAnalyzer);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+  }, [audioRef, enabled]);
+
+  return frequencyData;
+};
+
+// Component for audio-reactive wave circle
+const AudioWaveCircle = ({ frequencyData, isDark }) => {
+  const radius = 260;
+  const svgSize = 640;
+  const centerX = svgSize / 2;
+  const centerY = svgSize / 2;
+  const numPoints = 64;
+  const baseWaveHeight = 12;
+  const maxWaveHeight = 60;
+
+  // Generate wave path - only top half arc with mirrored frequencies
+  const generateWavePath = () => {
+    const points = [];
+    // Only generate points for top half: from left (-PI) to right (0)
+    const topHalfPoints = 32;
+    const halfPoints = topHalfPoints / 2;
+    
+    for (let i = 0; i <= topHalfPoints; i++) {
+      // Angle from -PI (left) to 0 (right), going through -PI/2 (top)
+      const angle = -Math.PI + (i / topHalfPoints) * Math.PI;
+      
+      // Mirror frequency data from center outward
+      // i=0 (left edge), i=16 (top center), i=32 (right edge)
+      let freqIndex;
+      if (i <= halfPoints) {
+        // Left half: map 0-16 to frequency bands
+        freqIndex = Math.floor((i / halfPoints) * (frequencyData.length - 1));
+      } else {
+        // Right half: mirror - map 32-16 to same frequency bands
+        freqIndex = Math.floor(((topHalfPoints - i) / halfPoints) * (frequencyData.length - 1));
+      }
+      
+      const freqValue = frequencyData[Math.min(freqIndex, frequencyData.length - 1)] || 0;
+      const waveHeight = baseWaveHeight + freqValue * maxWaveHeight;
+      const r = radius + waveHeight;
+      const x = centerX + Math.cos(angle) * r;
+      const y = centerY + Math.sin(angle) * r;
+      points.push({ x, y });
+    }
+
+    if (points.length === 0) return '';
+
+    // Simple smooth path through points
+    let path = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[Math.max(0, i - 1)];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[Math.min(points.length - 1, i + 2)];
+
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+      path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+
+    return path;
+  };
+
+  return (
+    <svg
+      width={svgSize}
+      height={svgSize}
+      viewBox={`0 0 ${svgSize} ${svgSize}`}
+      style={{
+        position: 'absolute',
+        top: '51%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        overflow: 'visible'
+      }}
+    >
+      <path
+        d={generateWavePath()}
+        fill="none"
+        stroke={isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.18)'}
+        strokeWidth="2"
+      />
+    </svg>
+  );
+};
+
+// Retro audio playlist
+import retroAudio1 from './assets/audio/technological-revolution-pecan-pie-main-version-29629-01-45.mp3';
+import retroAudio2 from './assets/audio/arcade-ride-vens-adams-main-version-27955-01-45.mp3';
+import retroAudio3 from './assets/audio/Open-Veil-by-Lily.mp3';
+
+const retroPlaylist = [
+  { src: retroAudio1, artist: 'Pecan Pie', url: 'https://uppbeat.io/track/pecan-pie/technological-revolution' },
+  { src: retroAudio2, artist: 'Vens Adams', url: 'https://uppbeat.io/browse/artist/vens-adams' },
+  { src: retroAudio3, artist: 'Lily', url: '' }
+];
 
 // Get initial active chat ID from localStorage
 const getInitialActiveChatId = () => {
@@ -18,9 +190,18 @@ const getInitialActiveChatId = () => {
 };
 
 const App = () => {
-  const { theme, isDark } = useTheme();
-  const ideModeRef = useRef(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const { theme, isDark, showAnimations, animationType, retroAudioEnabled, setRetroAudioEnabled, retroAudioVolume, setRetroAudioVolume } = useTheme();
+  const retroAudioRef = useRef(null);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const currentTrack = retroPlaylist[currentTrackIndex];
+  
+  // Audio analyzer for reactive wave circle
+  const frequencyData = useAudioAnalyzer(retroAudioRef, retroAudioEnabled && showAnimations && animationType === 'retro');
+  
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('sidebar-open');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(getInitialActiveChatId);
   
@@ -37,43 +218,9 @@ const App = () => {
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   
-  // IDE Mode State - persist to localStorage
-  const [isIDEMode, setIsIDEMode] = useState(() => {
-    return localStorage.getItem('ide-mode-active') === 'true';
-  });
-  const [showIDEChat, setShowIDEChat] = useState(() => {
-    const saved = localStorage.getItem('ide-chat-visible');
-    return saved !== null ? saved === 'true' : true;
-  });
-  const [ideActivePanel, setIdeActivePanel] = useState(() => {
-    return localStorage.getItem('ide-active-panel') || 'files';
-  });
-  const [ideSidePanelVisible, setIdeSidePanelVisible] = useState(() => {
-    const saved = localStorage.getItem('ide-sidepanel-visible');
-    return saved !== null ? saved === 'true' : true;
-  });
-  const [ideStatus, setIdeStatus] = useState({
-    line: 1,
-    column: 1,
-    language: '',
-    encoding: 'UTF-8',
-    lineEnding: 'CRLF',
-    indentation: 'Spaces: 2',
-    gitBranch: 'main',
-    errorCount: 0,
-    warningCount: 0
-  });
-  const [ideWorkspaceFolder, setIdeWorkspaceFolder] = useState(() => {
-    return localStorage.getItem('ide-workspace-folder') || null;
-  });
-
-  // Save IDE state to localStorage - combined into single effect
-  useEffect(() => {
-    localStorage.setItem('ide-mode-active', isIDEMode.toString());
-    localStorage.setItem('ide-chat-visible', showIDEChat.toString());
-    localStorage.setItem('ide-active-panel', ideActivePanel);
-    localStorage.setItem('ide-sidepanel-visible', ideSidePanelVisible.toString());
-  }, [isIDEMode, showIDEChat, ideActivePanel, ideSidePanelVisible]);
+  // Volume slider hover state
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  
   const [appSettings, setAppSettings] = useState({
     inferenceProvider: 'local',
     hfApiKey: '',
@@ -100,6 +247,11 @@ const App = () => {
       await window.electronAPI.saveSettings(newSettings);
     }
   };
+
+  // Persist sidebar state
+  useEffect(() => {
+    localStorage.setItem('sidebar-open', isSidebarOpen.toString());
+  }, [isSidebarOpen]);
 
   // Load chats from database on startup
   useEffect(() => {
@@ -245,266 +397,31 @@ const App = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
 
-  // Handle IDE menu actions
-  const handleIDEAction = useCallback((action) => {
-    switch (action) {
-      // File menu
-      case 'newFile':
-        ideModeRef.current?.newFile();
-        break;
-      case 'newFileAdvanced':
-        ideModeRef.current?.newFile();
-        break;
-      case 'openFile':
-        ideModeRef.current?.openFile();
-        break;
-      case 'openFolder':
-        ideModeRef.current?.openFolder();
-        break;
-      case 'save':
-        ideModeRef.current?.saveCurrentFile();
-        break;
-      case 'saveAs':
-        ideModeRef.current?.saveFileAs();
-        break;
-      case 'saveAll':
-        ideModeRef.current?.saveAllFiles();
-        break;
-      case 'revertFile':
-        ideModeRef.current?.revertFile();
-        break;
-      case 'closeEditor':
-        ideModeRef.current?.closeCurrentTab();
-        break;
-      case 'closeFolder':
-        ideModeRef.current?.closeFolder();
-        break;
-      case 'exit':
-        window.electronAPI?.close();
-        break;
-      
-      // Edit menu
-      case 'undo':
-        ideModeRef.current?.editorAction('undo');
-        break;
-      case 'redo':
-        ideModeRef.current?.editorAction('redo');
-        break;
-      case 'cut':
-        ideModeRef.current?.editorAction('cut');
-        break;
-      case 'copy':
-        ideModeRef.current?.editorAction('copy');
-        break;
-      case 'paste':
-        ideModeRef.current?.editorAction('paste');
-        break;
-      case 'toggleLineComment':
-        ideModeRef.current?.editorAction('toggleLineComment');
-        break;
-      case 'toggleBlockComment':
-        ideModeRef.current?.editorAction('toggleBlockComment');
-        break;
-      case 'findInFiles':
-        setIdeActivePanel('search');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      
-      // Selection menu
-      case 'selectAll':
-        ideModeRef.current?.editorAction('selectAll');
-        break;
-      case 'copyLineUp':
-        ideModeRef.current?.editorAction('copyLineUp');
-        break;
-      case 'copyLineDown':
-        ideModeRef.current?.editorAction('copyLineDown');
-        break;
-      case 'moveLineUp':
-        ideModeRef.current?.editorAction('moveLineUp');
-        break;
-      case 'moveLineDown':
-        ideModeRef.current?.editorAction('moveLineDown');
-        break;
-      case 'duplicateSelection':
-        ideModeRef.current?.editorAction('duplicateSelection');
-        break;
-      
-      // View menu
-      case 'viewExplorer':
-        setIdeActivePanel('files');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      case 'viewSearch':
-        setIdeActivePanel('search');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      case 'viewGit':
-        setIdeActivePanel('git');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      case 'viewRun':
-        setIdeActivePanel('debug');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      case 'viewExtensions':
-        setIdeActivePanel('extensions');
-        if (!ideSidePanelVisible) setIdeSidePanelVisible(true);
-        break;
-      case 'toggleSidebar':
-        setIdeSidePanelVisible(prev => !prev);
-        break;
-      case 'toggleChat':
-        setShowIDEChat(prev => !prev);
-        break;
-      case 'toggleWordWrap':
-        ideModeRef.current?.toggleWordWrap();
-        break;
-      case 'about':
-        alert('OpenMind IDE v1.0\n\nAI-powered code development with local Ollama models.');
-        break;
-      
-      // Terminal menu
-      case 'newTerminal':
-      case 'viewTerminal':
-        ideModeRef.current?.openTerminal();
-        break;
-      case 'runActiveFile':
-        ideModeRef.current?.runActiveFile();
-        break;
-      default:
-        console.log('IDE Action:', action);
-    }
-  }, [ideSidePanelVisible]);
-
-  // Global keyboard shortcuts for IDE mode
-  useEffect(() => {
-    if (!isIDEMode) return;
-
-    const handleKeyDown = (e) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      const shift = e.shiftKey;
-      const alt = e.altKey;
-
-      // File menu shortcuts
-      if (ctrl && !shift && !alt && e.key === 'n') {
-        e.preventDefault();
-        handleIDEAction('newFile');
-      }
-      if (ctrl && !shift && !alt && e.key === 'o') {
-        e.preventDefault();
-        handleIDEAction('openFile');
-      }
-      if (ctrl && !shift && !alt && e.key === 's') {
-        e.preventDefault();
-        handleIDEAction('save');
-      }
-      if (ctrl && shift && !alt && e.key === 'S') {
-        e.preventDefault();
-        handleIDEAction('saveAs');
-      }
-      if (ctrl && !shift && !alt && e.key === 'F4') {
-        e.preventDefault();
-        handleIDEAction('closeEditor');
-      }
-      if (ctrl && !shift && !alt && e.key === 'w') {
-        e.preventDefault();
-        handleIDEAction('closeEditor');
-      }
-
-      // Edit menu shortcuts
-      if (ctrl && !shift && !alt && e.key === 'z') {
-        e.preventDefault();
-        handleIDEAction('undo');
-      }
-      if (ctrl && !shift && !alt && e.key === 'y') {
-        e.preventDefault();
-        handleIDEAction('redo');
-      }
-      if (ctrl && shift && !alt && e.key === 'Z') {
-        e.preventDefault();
-        handleIDEAction('redo');
-      }
-      if (ctrl && !shift && !alt && e.key === '/') {
-        e.preventDefault();
-        handleIDEAction('toggleLineComment');
-      }
-      if (ctrl && shift && !alt && e.key === 'F') {
-        e.preventDefault();
-        handleIDEAction('findInFiles');
-      }
-      if (shift && alt && !ctrl && e.key === 'A') {
-        e.preventDefault();
-        handleIDEAction('toggleBlockComment');
-      }
-
-      // Selection menu shortcuts
-      if (ctrl && !shift && !alt && e.key === 'a') {
-        // Let default select all work in textarea
-      }
-      if (ctrl && !shift && !alt && e.key === 'd') {
-        e.preventDefault();
-        handleIDEAction('duplicateSelection');
-      }
-      if (shift && alt && !ctrl && e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleIDEAction('copyLineUp');
-      }
-      if (shift && alt && !ctrl && e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleIDEAction('copyLineDown');
-      }
-      if (alt && !ctrl && !shift && e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleIDEAction('moveLineUp');
-      }
-      if (alt && !ctrl && !shift && e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleIDEAction('moveLineDown');
-      }
-
-      // View menu shortcuts
-      if (ctrl && shift && !alt && e.key === 'E') {
-        e.preventDefault();
-        handleIDEAction('viewExplorer');
-      }
-      if (ctrl && shift && !alt && e.key === 'G') {
-        e.preventDefault();
-        handleIDEAction('viewGit');
-      }
-      if (ctrl && shift && !alt && e.key === 'D') {
-        e.preventDefault();
-        handleIDEAction('viewRun');
-      }
-      if (ctrl && shift && !alt && e.key === 'X') {
-        e.preventDefault();
-        handleIDEAction('viewExtensions');
-      }
-      if (ctrl && !shift && !alt && e.key === 'b') {
-        e.preventDefault();
-        handleIDEAction('toggleSidebar');
-      }
-      if (ctrl && shift && !alt && e.key === 'C') {
-        e.preventDefault();
-        handleIDEAction('toggleChat');
-      }
-      if (alt && !ctrl && !shift && e.key === 'z') {
-        e.preventDefault();
-        handleIDEAction('toggleWordWrap');
-      }
-      
-      // Terminal shortcut (Ctrl+Shift+ö or Ctrl+`)
-      if (ctrl && shift && (e.key === 'ö' || e.key === '`')) {
-        e.preventDefault();
-        handleIDEAction('newTerminal');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isIDEMode, handleIDEAction]);
-
   const activeChat = chats.find(c => c.id === activeChatId);
+
+  // Retro audio control
+  useEffect(() => {
+    if (retroAudioRef.current) {
+      const shouldPlay = showAnimations && animationType === 'retro' && retroAudioEnabled && (!activeChatId || !activeChat?.messages?.length);
+      if (shouldPlay) {
+        retroAudioRef.current.play().catch(() => {});
+      } else {
+        retroAudioRef.current.pause();
+      }
+    }
+  }, [showAnimations, animationType, retroAudioEnabled, activeChatId, activeChat, currentTrackIndex]);
+
+  // Retro audio volume control
+  useEffect(() => {
+    if (retroAudioRef.current) {
+      retroAudioRef.current.volume = retroAudioVolume;
+    }
+  }, [retroAudioVolume]);
+
+  // Handle track end - play next track
+  const handleTrackEnd = useCallback(() => {
+    setCurrentTrackIndex((prev) => (prev + 1) % retroPlaylist.length);
+  }, []);
 
   return (
     <div style={{
@@ -517,297 +434,373 @@ const App = () => {
       overflow: 'hidden',
       transition: 'background 0.3s, color 0.3s'
     }}>
-      <TitleBar 
-        isIDEMode={isIDEMode}
-        showIDEChat={showIDEChat}
-        onToggleIDEChat={() => setShowIDEChat(!showIDEChat)}
-        onIDEAction={handleIDEAction}
-        projectPath={ideWorkspaceFolder}
+      {/* Global animation layer - only visible when no active chat and animations enabled */}
+      {showAnimations && (!activeChatId || !activeChat?.messages?.length) && (
+        <>
+          {animationType === 'circles' && (
+            <>
+              <style>
+                {`
+                  @keyframes spin-cw {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                  }
+                  @keyframes spin-ccw {
+                    from { transform: rotate(360deg); }
+                    to { transform: rotate(0deg); }
+                  }
+                `}
+              </style>
+              
+              {/* Top-right arc */}
+              <svg style={{
+                position: 'fixed',
+                top: '-350px',
+                right: '-350px',
+                width: '700px',
+                height: '700px',
+                pointerEvents: 'none',
+                zIndex: 0,
+                animation: 'spin-cw 80s linear infinite',
+                willChange: 'transform'
+              }}>
+                <circle
+                  cx="350"
+                  cy="350"
+                  r="320"
+                  fill="none"
+                  stroke={isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.12)'}
+                  strokeWidth="2"
+                  strokeDasharray="10 16"
+                  strokeLinecap="round"
+                />
+              </svg>
+              
+              {/* Bottom-left arc */}
+              <svg style={{
+                position: 'fixed',
+                bottom: '-300px',
+                left: '-300px',
+                width: '600px',
+                height: '600px',
+                pointerEvents: 'none',
+                zIndex: 0,
+                animation: 'spin-ccw 60s linear infinite',
+                willChange: 'transform'
+              }}>
+                <circle
+                  cx="300"
+                  cy="300"
+                  r="270"
+                  fill="none"
+                  stroke={isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.10)'}
+                  strokeWidth="1.5"
+                  strokeDasharray="6 12"
+                  strokeLinecap="round"
+                />
+              </svg>
+              
+              {/* Center arc - positioned in chat area */}
+              <svg style={{
+                position: 'fixed',
+                top: '50%',
+                left: isSidebarOpen ? 'calc(50% + 130px)' : '50%',
+                width: '500px',
+                height: '500px',
+                marginTop: '-250px',
+                marginLeft: '-250px',
+                pointerEvents: 'none',
+                zIndex: 0,
+                animation: 'spin-cw 100s linear infinite',
+                transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                willChange: 'transform'
+              }}>
+                <circle
+                  cx="250"
+                  cy="250"
+                  r="230"
+                  fill="none"
+                  stroke={isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.10)'}
+                  strokeWidth="2"
+                  strokeDasharray="8 14"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </>
+          )}
+          
+          {animationType === 'retro' && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              left: isSidebarOpen ? '260px' : '0px',
+              pointerEvents: 'none',
+              zIndex: 0,
+              overflow: 'hidden',
+              transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              contain: 'strict'
+            }}>
+              <style>
+                {`
+                  @keyframes gridMoveTowards {
+                    from { background-position-y: 0; }
+                    to { background-position-y: 50px; }
+                  }
+                `}
+              </style>
+              
+              {/* Perspective Grid - vertical lines (gray, static) */}
+              <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: '-50%',
+                width: '200%',
+                height: '45%',
+                background: isDark 
+                  ? 'repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 80px)'
+                  : 'repeating-linear-gradient(90deg, rgba(0,0,0,0.1) 0px, rgba(0,0,0,0.1) 1px, transparent 1px, transparent 80px)',
+                transform: 'perspective(500px) rotateX(60deg)',
+                transformOrigin: 'center top',
+                backfaceVisibility: 'hidden'
+              }} />
+              
+              {/* Horizontal grid lines (gray, moving towards viewer) */}
+              <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: '-50%',
+                width: '200%',
+                height: '45%',
+                background: isDark
+                  ? 'repeating-linear-gradient(0deg, rgba(255,255,255,0.1) 0px, rgba(255,255,255,0.1) 1px, transparent 1px, transparent 50px)'
+                  : 'repeating-linear-gradient(0deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px, transparent 1px, transparent 50px)',
+                transform: 'perspective(500px) rotateX(60deg)',
+                transformOrigin: 'center top',
+                animation: 'gridMoveTowards 2s linear infinite',
+                willChange: 'background-position',
+                backfaceVisibility: 'hidden'
+              }} />
+              
+              {/* Sun circle outline - centered in chat area */}
+              <div style={{
+                position: 'absolute',
+                top: '51%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '460px',
+                height: '460px',
+                borderRadius: '50%',
+                border: isDark 
+                  ? '2px solid rgba(255,255,255,0.15)' 
+                  : '2px solid rgba(0,0,0,0.15)',
+                background: 'transparent',
+                clipPath: 'polygon(0 0, 100% 0, 100% 50%, 0 50%)'
+              }} />
+              
+              {/* Audio-reactive wave circle */}
+              <AudioWaveCircle frequencyData={frequencyData} isDark={isDark} />
+              
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Music credit - outside animation container for clickability */}
+      {showAnimations && animationType === 'retro' && (!activeChatId || !activeChat?.messages?.length) && (
+        <div style={{
+          position: 'fixed',
+          bottom: '14px',
+          right: '14px',
+          fontSize: '0.7rem',
+          color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+          zIndex: 100,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          {/* Volume button with slide-out slider */}
+          <div 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onMouseEnter={() => setShowVolumeSlider(true)}
+            onMouseLeave={() => setShowVolumeSlider(false)}
+          >
+            {/* Sliding volume slider */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: showVolumeSlider ? '65px' : '0px',
+              opacity: showVolumeSlider ? 1 : 0,
+              transition: 'width 0.25s ease, opacity 0.2s ease',
+              overflow: 'hidden',
+              height: '20px'
+            }}>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={retroAudioVolume}
+                onChange={(e) => setRetroAudioVolume(parseFloat(e.target.value))}
+                style={{
+                  width: '60px',
+                  height: '4px',
+                  cursor: 'pointer',
+                  accentColor: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                  opacity: 0.8,
+                  flexShrink: 0
+                }}
+                title={`Volume: ${Math.round(retroAudioVolume * 100)}%`}
+              />
+            </div>
+            
+            {/* Volume/Mute button */}
+            <button
+              onClick={() => setRetroAudioEnabled(!retroAudioEnabled)}
+              style={{
+                background: showVolumeSlider 
+                  ? (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)')
+                  : 'transparent',
+                border: 'none',
+                padding: '4px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                color: showVolumeSlider
+                  ? (isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)')
+                  : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'),
+                display: 'flex',
+                alignItems: 'center',
+                transition: 'all 0.2s'
+              }}
+              title={retroAudioEnabled ? 'Mute' : 'Unmute'}
+            >
+              {retroAudioEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+            </button>
+          </div>
+          
+          {/* Music credit */}
+          <span>
+            Music by{' '}
+            <span 
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                if (window.electronAPI?.openExternal) {
+                  window.electronAPI.openExternal(currentTrack.url);
+                } else {
+                  window.open(currentTrack.url, '_blank');
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (window.electronAPI?.openExternal) {
+                    window.electronAPI.openExternal(currentTrack.url);
+                  } else {
+                    window.open(currentTrack.url, '_blank');
+                  }
+                }
+              }}
+              style={{
+                color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+                transition: 'color 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)'}
+              onMouseLeave={(e) => e.currentTarget.style.color = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'}
+            >
+              {currentTrack.artist}
+            </span>
+          </span>
+        </div>
+      )}
+
+      {/* Audio element - outside animation container */}
+      <audio 
+        ref={retroAudioRef} 
+        src={currentTrack.src} 
+        preload="auto"
+        onEnded={handleTrackEnd}
       />
+
+      <TitleBar />
 
       <div style={{
         display: 'flex',
         flex: 1,
         overflow: 'hidden',
         position: 'relative',
-        background: theme.bg
+        background: 'transparent'
       }}>
-        {isIDEMode ? (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            {/* IDE Main Area */}
-            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* IDE Activity Bar - Fixed 48px, never shrinks */}
-              <IDEActivityBar
-                activePanel={ideActivePanel}
-                onPanelChange={setIdeActivePanel}
-                onExitIDE={() => setIsIDEMode(false)}
-                onOpenSettings={() => setShowSettings(true)}
-                isSidePanelVisible={ideSidePanelVisible}
-                onToggleSidePanel={() => setIdeSidePanelVisible(!ideSidePanelVisible)}
-                showChat={showIDEChat}
-                onToggleChat={() => setShowIDEChat(!showIDEChat)}
-              />
-              
-              {/* IDE Main Content - flex: 1, shrinks when chat opens */}
-              <IDEMode 
-                ref={ideModeRef}
-                onExitIDE={() => setIsIDEMode(false)} 
-                activePanel={ideActivePanel}
-                isSidePanelVisible={ideSidePanelVisible}
-                onStatusChange={setIdeStatus}
-                onWorkspaceChange={setIdeWorkspaceFolder}
-              />
-              
-              {/* IDE Chat Sidebar - only rendered when visible */}
-              {showIDEChat && (
-                <IDEChatSidebar 
-                  inferenceSettings={appSettings}
-                  onClose={() => setShowIDEChat(false)}
-                />
-              )}
-            </div>
-            
-            {/* Status Bar - VS Code Style */}
-            <div style={{
-              height: '22px',
-              background: theme.bgSecondary,
-              borderTop: `1px solid ${theme.border}`,
+        {/* Normal Chat Mode */}
+        <div style={{
+          width: isSidebarOpen ? '260px' : '0px',
+          opacity: isSidebarOpen ? 1 : 0,
+          transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          willChange: 'width, opacity'
+        }}>
+          <div style={{ width: '260px', height: '100%' }}>
+            <Sidebar
+              chats={chats}
+              activeChatId={activeChatId}
+              onSelectChat={setActiveChatId}
+              onNewChat={handleNewChat}
+              onDeleteChat={handleDeleteChat}
+              onRenameChat={handleRenameChat}
+              onToggleSidebar={toggleSidebar}
+              hfUser={hfUser}
+              onOpenLoginModal={handleOpenLoginModal}
+              onHfLogout={handleHfLogout}
+              onOpenModelCreator={() => setShowModelCreator(true)}
+              onOpenSettings={() => setShowSettings(true)}
+            />
+          </div>
+        </div>
+
+        {!isSidebarOpen && (
+          <button
+            onClick={toggleSidebar}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              left: '16px',
+              zIndex: 100,
+              background: 'transparent',
+              border: 'none',
+              color: '#888',
+              cursor: 'pointer',
+              padding: '4px',
+              borderRadius: '4px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '0',
-              fontSize: '0.7rem',
-              color: theme.textSecondary,
-              flexShrink: 0
-            }}>
-              {/* Left Side */}
-              <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                {/* Git Branch */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '4px', 
-                  padding: '0 8px',
-                  height: '100%',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M4.75 7a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zM4.75 2a2.75 2.75 0 0 0-.87 5.36v1.39c0 .138.112.25.25.25h.25v5.25a.75.75 0 0 0 1.5 0V9h.25a.25.25 0 0 0 .25-.25V7.36A2.75 2.75 0 0 0 4.75 2zm6.5 5a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zm0-5a2.75 2.75 0 0 0-.87 5.36v.89a.25.25 0 0 1-.25.25H9.5a.75.75 0 0 0 0 1.5h.63a1.75 1.75 0 0 0 1.75-1.75v-.89A2.75 2.75 0 0 0 11.25 2z"/>
-                  </svg>
-                  <span>{ideStatus.gitBranch}</span>
-                </div>
-                {/* Sync */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  padding: '0 6px',
-                  height: '100%',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M2.5 2v4H1V1h5v1.5H2.5zm11 0h-4V1h5v5h-1.5V2.5h-.5zM2.5 14V10H1v5h5v-1.5H2.5zm11 0h-4v1.5h5V10h-1.5v4h-.5z"/>
-                  </svg>
-                </div>
-                {/* Errors & Warnings */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '6px',
-                  padding: '0 8px',
-                  height: '100%',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.errorCount > 0 ? theme.error : 'inherit' }}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11zM7.25 4v5h1.5V4h-1.5zm0 6v1.5h1.5V10h-1.5z"/>
-                    </svg>
-                    {ideStatus.errorCount}
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: ideStatus.warningCount > 0 ? theme.warning : 'inherit' }}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M7.56 1h.88l6.54 12.26-.44.74H1.44l-.42-.74L7.56 1zm.44 1.67L2.63 13h10.74L8 2.67zM7.25 6v4h1.5V6h-1.5zm0 5v1.5h1.5V11h-1.5z"/>
-                    </svg>
-                    {ideStatus.warningCount}
-                  </span>
-                </div>
-              </div>
-              
-              {/* Right Side */}
-              <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                {/* Line & Column */}
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  Ln {ideStatus.line}, Col {ideStatus.column}
-                </div>
-                {/* Spaces */}
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  {ideStatus.indentation}
-                </div>
-                {/* Encoding */}
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  {ideStatus.encoding}
-                </div>
-                {/* Line Ending */}
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  {ideStatus.lineEnding}
-                </div>
-                {/* Language */}
-                {ideStatus.language && (
-                <div style={{ 
-                  padding: '0 8px',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                  {ideStatus.language}
-                </div>
-                )}
-                {/* Notifications - Opens Welcome Tab */}
-                <div 
-                  style={{ 
-                    padding: '0 8px',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    cursor: 'pointer',
-                    position: 'relative'
-                  }}
-                  onClick={() => ideModeRef.current?.openWelcomeTab?.()}
-                  title="Welcome & What's New"
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 1.5A5.5 5.5 0 0 0 2.5 7v3.5l-1 1V13h13v-1.5l-1-1V7A5.5 5.5 0 0 0 8 1.5zm0 13a2 2 0 0 1-2-2h4a2 2 0 0 1-2 2z"/>
-                  </svg>
-                  {/* Notification dot for new updates */}
-                  {!localStorage.getItem('openmind-seen-v0.3.0') && (
-                    <span style={{
-                      position: 'absolute',
-                      top: '6px',
-                      right: '6px',
-                      width: '6px',
-                      height: '6px',
-                      background: '#6366f1',
-                      borderRadius: '50%'
-                    }} />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Normal Chat Mode */}
-            <div style={{
-              width: isSidebarOpen ? '260px' : '0px',
-              opacity: isSidebarOpen ? 1 : 0,
-              transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-              willChange: 'width, opacity'
-            }}>
-              <div style={{ width: '260px', height: '100%' }}>
-                <Sidebar
-                  chats={chats}
-                  activeChatId={activeChatId}
-                  onSelectChat={setActiveChatId}
-                  onNewChat={handleNewChat}
-                  onDeleteChat={handleDeleteChat}
-                  onRenameChat={handleRenameChat}
-                  onToggleSidebar={toggleSidebar}
-                  hfUser={hfUser}
-                  onOpenLoginModal={handleOpenLoginModal}
-                  onHfLogout={handleHfLogout}
-                  onOpenModelCreator={() => setShowModelCreator(true)}
-                  onOpenSettings={() => setShowSettings(true)}
-                  onOpenIDE={() => setIsIDEMode(true)}
-                  isIDEMode={isIDEMode}
-                />
-              </div>
-            </div>
-
-            {!isSidebarOpen && (
-              <button
-                onClick={toggleSidebar}
-                style={{
-                  position: 'absolute',
-                  top: '16px',
-                  left: '16px',
-                  zIndex: 100,
-                  background: isDark ? 'rgba(15, 15, 25, 0.7)' : 'rgba(255, 255, 255, 0.9)',
-                  border: `1px solid ${theme.border}`,
-                  color: theme.text,
-                  cursor: 'pointer',
-                  padding: '8px',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.2s',
-                  backdropFilter: 'blur(10px)',
-                  boxShadow: isDark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.1)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = theme.bgActive;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = isDark ? 'rgba(15, 15, 25, 0.7)' : 'rgba(255, 255, 255, 0.9)';
-                }}
-              >
-                <PanelLeft size={24} />
-              </button>
-            )}
-
-            <ChatArea
-              activeChatId={activeChatId}
-              messages={activeChat?.messages || []}
-              onUpdateMessages={handleUpdateMessages}
-              onFirstMessage={handleFirstMessage}
-              inferenceSettings={appSettings}
-            />
-          </>
+              justifyContent: 'center',
+              transition: 'background 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <PanelLeft size={20} />
+          </button>
         )}
+
+        <ChatArea
+          activeChatId={activeChatId}
+          messages={activeChat?.messages || []}
+          onUpdateMessages={handleUpdateMessages}
+          onFirstMessage={handleFirstMessage}
+          inferenceSettings={appSettings}
+        />
       </div>
 
       <LoginModal
@@ -832,7 +825,6 @@ const App = () => {
         settings={appSettings}
         onSaveSettings={handleSaveSettings}
       />
-
     </div>
   );
 };

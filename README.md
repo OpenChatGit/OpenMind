@@ -1,22 +1,20 @@
 # OpenMind
 
-A modern AI chat application built with Electron, React, and local LLM support via Ollama, with HuggingFace cloud inference and local image generation.
+A modern AI chat application built with Electron, React, and local LLM support via Ollama with local image generation.
 
 ## Features
 
-- 💬 **Chat with AI models** - Local (Ollama) or Cloud (HuggingFace)
+- 💬 **Chat with AI models** - Local inference via Ollama
 - 🧠 **Reasoning support** - View model thinking process (DeepSeek-R1, Qwen-QwQ, etc.)
 - 👁️ **Vision models** - Analyze images with llava, bakllava, moondream
 - 🎨 **Image generation** - Local GGUF models with GPU acceleration (CUDA)
 - 🖼️ **Fullscreen images** - Click generated images to view in fullscreen
 - 📎 **Image attachments** - File picker or clipboard paste (Ctrl+V)
 - 🔍 **DeepSearch** - Web search with tool use
-- 🔌 **MCP Tools** - Model Context Protocol support
-- 🤗 **HuggingFace** - Cloud inference with HF Pro subscription (Optional)
 - 📊 **Inference Stats** - Token counts, speed, duration (like Ollama verbose)
 - 🔄 **Regenerate** - Re-run any AI response
 - 📋 **Copy** - One-click copy AI responses
-- 🛠️ **IDE Mode** - Built-in code editor with VS Code-style interface (v1 - Beta)
+
 
 ## Quick Start
 
@@ -31,9 +29,8 @@ npm run electron
 npm run electron:build
 ```
 
-## Inference Providers
+## Ollama Setup
 
-### Local (Ollama)
 Run models locally on your machine. Requires [Ollama](https://ollama.ai) installed and running.
 
 ```bash
@@ -41,15 +38,6 @@ Run models locally on your machine. Requires [Ollama](https://ollama.ai) install
 ollama pull llama3.2
 ollama pull qwen3:4b  # With reasoning support
 ```
-
-### HuggingFace (Cloud)
-Use HuggingFace Inference API for cloud-based models. Requires HF Pro subscription for best models.
-
-1. Get API key from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-2. Open Settings → Inference → Select "Hugging Face"
-3. Enter your API key
-
-Supported models include Llama, Mistral, Qwen, Phi, and more.
 
 ## Image Generation Setup
 
@@ -169,26 +157,38 @@ OpenMind supports reasoning/thinking models that show their thought process:
 - `qwen3:4b`, `qwen3:8b` - Use `/think` or `/no_think` in prompt
 - `deepseek-r1:7b`, `deepseek-r1:14b`
 
-**HuggingFace:**
-- Models with `<think>` tags or `reasoning_content` field
-- DeepSeek-R1, Qwen-QwQ variants
-
 The reasoning is shown in a collapsible "Reasoning" section above the response.
+
+## 🎨 Retro Synthwave Theme
+
+OpenMind includes an optional 80s Synthwave visual theme - purely for aesthetic flair!
+
+> ⚠️ **Note:** This is just eye candy! It doesn't affect any app functionality but are not done yet.
+
+### Features
+- **Animated Grid** - Perspective grid moving towards you
+- **Retro Sun** - Classic synthwave half-circle
+- **Audio-Reactive Visualizer** - Outer circle with waves that react to the music
+- **Background Music** - Three synthwave tracks included:
+  - "Technological Revolution" by Pecan Pie
+  - "Arcade Ride" by Vens Adams  
+  - "Open Veil" by Lily
+- **Volume Control** - Hover over the speaker icon to reveal the slider
+
+Enable it in Settings → Animations → Retro Synthwave **not done yet**
 
 ## Tech Stack
 
 - **Frontend:** React 19, Vite
 - **Desktop:** Electron
-- **AI:** Ollama, HuggingFace Inference API
+- **AI:** Ollama
 - **Image Gen:** Python, Diffusers, PyTorch
-- **Tools:** MCP SDK
 
 ## Project Structure
 
 ```
 ├── electron/          # Electron main process
 │   ├── main.js        # Main entry, IPC handlers
-│   ├── huggingface.js # HF API integration
 │   ├── deepSearch.js  # Web search tools
 │   └── preload.js     # Context bridge
 ├── src/               # React frontend
@@ -196,51 +196,7 @@ The reasoning is shown in a collapsible "Reasoning" section above the response.
 │   └── App.jsx        # Main app
 ├── python/            # Image generation
 │   └── image_gen.py   # Diffusers script
-└── mcp-tools/         # MCP tool servers
 ```
-
-## IDE Mode (v1 - Beta)
-
-OpenMind includes a built-in IDE mode designed to feel familiar to VS Code users. If you know VS Code, you already know how to use OpenMind IDE. Click the **Code** button in the sidebar to switch to IDE mode.
-
-> ⚠️ **Note:** IDE Mode is currently in v1 (Beta). Some features may be incomplete or have bugs. We're actively improving it!
-
-### VS Code-Style Experience
-
-The IDE is designed to match VS Code's look and feel:
-
-- 🎨 **Seti UI File Icons** - The same icon theme used by VS Code
-- � **Faamiliar File Explorer** - Same layout and behavior as VS Code
-- ⌨️ **Same Keyboard Shortcuts** - Ctrl+S, Ctrl+W, Ctrl+B work as expected
-- 🎯 **Monaco Editor** - The same editor engine that powers VS Code
-- 🌙 **Dark Theme** - Comfortable for long coding sessions
-
-### IDE Features
-
-- 📁 **File Explorer** - Browse, create, rename, and delete files/folders
-- 📝 **Code Editor** - Syntax highlighting for 30+ languages (JS, TS, Python, etc.)
-- 🗂️ **Tab Management** - Multiple open files with unsaved changes indicator
-- 🔍 **Search in Files** - VS Code-style search with regex support
-- � **Integratted Terminal** - Full terminal with PowerShell/Bash support
-- �  **Integrated AI Chat** - Ask questions about your code in the sidebar
-- � ***Markdown Preview** - Preview .md files with syntax highlighting
-- 🔄 **Project Management** - Create new projects or open existing folders
-
-### IDE Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+S` | Save current file |
-| `Ctrl+W` | Close current tab |
-| `Ctrl+Shift+F` | Focus search |
-| `Ctrl+Shift+C` | Toggle AI chat |
-| `Ctrl+B` | Toggle sidebar |
-
-### Known Limitations (v1)
-
-- Git integration is read-only (shows branch name only)
-- Extensions panel is placeholder
-- Debug panel is placeholder
 
 ## Changelog
 

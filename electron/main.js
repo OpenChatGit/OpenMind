@@ -6,28 +6,14 @@ const { initDatabase, loadChats, saveChats, saveChat, deleteChat } = require('./
 const { scanModelsFolder, scanDiffusionModels, getModelInfo } = require('./modelScanner');
 const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, getUserInfo, sendInferenceMessage, getInferenceModels, searchInferenceModels } = require('./huggingface');
 const { initBrowser, closeBrowser, getDeepSearchTools, executeToolCall } = require('./deepSearch');
-const { initMcpHandler, getTools, getEnabledTools, getOllamaToolDefinitions, toggleTool, refreshTools, executeTool, openToolsFolder } = require('./mcpHandler');
 const imageGen = require('./imageGen');
-const { analyzeFile, analyzeWorkspace } = require('./codeAnalyzer');
-
-// Helper function to extract <think> tags from content (for models like Qwen3 that output thinking in content)
-function extractThinkTags(content) {
-    const thinkRegex = /<think>([\s\S]*?)<\/think>/gi;
-    let thinking = '';
-    let cleanContent = content;
-    
-    let match;
-    while ((match = thinkRegex.exec(content)) !== null) {
-        thinking += match[1].trim() + '\n';
-    }
-    
-    // Remove think tags from content
-    cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    
-    return { thinking: thinking.trim(), content: cleanContent };
-}
+const ollama = require('./ollama');
+const ollamaManager = require('./ollamaManager');
+const localLlama = require('./localLlama');
 
 let mainWindow;
+let ollamaHost = '127.0.0.1';
+let lastOllamaStatus = 'stopped';
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -80,308 +66,156 @@ ipcMain.on('close-window', () => {
     if (mainWindow) mainWindow.close();
 });
 
-// Fetch Ollama Models
-ipcMain.handle('get-ollama-models', async () => {
-    return new Promise((resolve) => {
-        const req = http.get(`http://${ollamaHost}:11434/api/tags`, { timeout: 5000 }, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    resolve(parsed.models || []);
-                } catch (e) {
-                    resolve([]);
-                }
-            });
-        });
-        req.on('error', () => resolve([]));
-        req.on('timeout', () => {
-            req.destroy();
-            resolve([]);
-        });
-        req.end();
+// Ollama Server Management (with bundled binary support)
+ipcMain.handle('get-ollama-server-status', async () => {
+    const status = ollamaManager.getStatus();
+    const running = await ollamaManager.isServerRunning();
+    return { ...status, running };
+});
+
+ipcMain.handle('start-ollama-server', async () => {
+    return await ollamaManager.startServer((log) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ollama-server-log', log);
+        }
     });
 });
 
-// Send message to Ollama with streaming and reasoning support (including vision)
+ipcMain.handle('stop-ollama-server', async () => {
+    ollamaManager.stopServer();
+    return { success: true };
+});
+
+ipcMain.handle('download-ollama', async () => {
+    return await ollamaManager.downloadOllama((progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ollama-download-progress', progress);
+        }
+    });
+});
+
+ipcMain.handle('check-ollama-updates', async () => {
+    return await ollamaManager.checkForUpdates();
+});
+
+// Fetch Ollama Models (using ollama-js library)
+ipcMain.handle('get-ollama-models', async () => {
+    const host = `http://${ollamaHost}:11434`;
+    return await ollama.listModels(host);
+});
+
+// Pull Ollama Model
+ipcMain.handle('pull-ollama-model', async (event, modelName) => {
+    console.log('Pulling Ollama model:', modelName);
+    const host = `http://${ollamaHost}:11434`;
+    
+    return await ollama.pullModel(modelName, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ollama-pull-progress', { modelName, ...progress });
+        }
+    }, host);
+});
+
+// Delete Ollama Model
+ipcMain.handle('delete-ollama-model', async (event, modelName) => {
+    console.log('Deleting Ollama model:', modelName);
+    const host = `http://${ollamaHost}:11434`;
+    return await ollama.deleteModel(modelName, host);
+});
+
+// Get Ollama Model Info
+ipcMain.handle('get-ollama-model-info', async (event, modelName) => {
+    const host = `http://${ollamaHost}:11434`;
+    return await ollama.showModel(modelName, host);
+});
+
+// ============ Local LLM (node-llama-cpp) ============
+
+// Get local GGUF models
+ipcMain.handle('get-local-models', async () => {
+    return localLlama.listLocalModels();
+});
+
+// Load a local model
+ipcMain.handle('load-local-model', async (event, modelPath) => {
+    return await localLlama.loadModel(modelPath, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('local-model-progress', progress);
+        }
+    });
+});
+
+// Unload local model
+ipcMain.handle('unload-local-model', async () => {
+    await localLlama.unloadModel();
+    return { success: true };
+});
+
+// Get local LLM status
+ipcMain.handle('get-local-llm-status', async () => {
+    return localLlama.getStatus();
+});
+
+// Chat with local model
+ipcMain.handle('send-local-message', async (event, { messages }) => {
+    console.log('Sending to local LLM:', { messageCount: messages.length });
+    
+    try {
+        const response = await localLlama.chat(
+            messages,
+            (content) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('ollama-message-update', content);
+                }
+            },
+            (thinking) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('ollama-thinking-update', thinking);
+                }
+            }
+        );
+        return response;
+    } catch (error) {
+        console.error('Local LLM error:', error);
+        throw error;
+    }
+});
+
+// Send message to Ollama with streaming and reasoning support (using ollama-js library)
 ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
     console.log('Sending to Ollama:', { model, messageCount: messages.length });
 
-    // Transform messages to Ollama format (handle images for vision models)
-    const ollamaMessages = messages.map(msg => {
-        if (msg.images && msg.images.length > 0) {
-            // Vision message with images - Ollama expects base64 strings in 'images' array
-            return {
-                role: msg.role,
-                content: msg.content,
-                images: msg.images.map(img => img.base64 || img)
-            };
+    const host = `http://${ollamaHost}:11434`;
+    
+    // Callbacks for streaming updates
+    const onThinking = (thinking) => {
+        try {
+            if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+                mainWindow.webContents.send('ollama-thinking-update', thinking);
+            }
+        } catch (err) {
+            console.error('Error sending thinking update:', err.message);
         }
-        return {
-            role: msg.role,
-            content: msg.content
-        };
-    });
-
-    return new Promise((resolve, reject) => {
-        const postData = JSON.stringify({
-            model: model,
-            messages: ollamaMessages,
-            stream: true
-        });
-
-        const options = {
-            hostname: ollamaHost,
-            port: 11434,
-            path: '/api/chat',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(postData)
-            },
-            timeout: 60000
-        };
-
-        const req = http.request(options, (res) => {
-            let buffer = '';
-            let thinkingContent = '';
-            let messageContent = '';
-            let rawContent = ''; // Track raw content for <think> tag extraction
-
-            res.on('data', (chunk) => {
-                buffer += chunk.toString();
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-
-                    try {
-                        const parsed = JSON.parse(line);
-
-                        // Handle native thinking field (some models)
-                        if (parsed.message?.thinking) {
-                            thinkingContent += parsed.message.thinking;
-                            try {
-                                if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-                                    mainWindow.webContents.send('ollama-thinking-update', thinkingContent);
-                                }
-                            } catch (err) {
-                                console.error('Error sending thinking update:', err.message);
-                            }
-                        }
-
-                        if (parsed.message?.content) {
-                            rawContent += parsed.message.content;
-                            
-                            // Extract <think> tags from content (for Qwen3 and similar models)
-                            const extracted = extractThinkTags(rawContent);
-                            
-                            // Update thinking if found in content
-                            if (extracted.thinking && extracted.thinking !== thinkingContent) {
-                                thinkingContent = extracted.thinking;
-                                try {
-                                    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-                                        mainWindow.webContents.send('ollama-thinking-update', thinkingContent);
-                                    }
-                                } catch (err) {
-                                    console.error('Error sending thinking update:', err.message);
-                                }
-                            }
-                            
-                            // Send clean content (without think tags)
-                            messageContent = extracted.content;
-                            try {
-                                if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-                                    mainWindow.webContents.send('ollama-message-update', messageContent);
-                                }
-                            } catch (err) {
-                                console.error('Error sending message update:', err.message);
-                            }
-                        }
-
-                        if (parsed.done) {
-                            console.log('Stream complete');
-                            // Final extraction to ensure we got everything
-                            const finalExtracted = extractThinkTags(rawContent);
-                            
-                            // Extract inference stats from Ollama response
-                            const stats = {
-                                total_duration: parsed.total_duration, // nanoseconds
-                                load_duration: parsed.load_duration,
-                                prompt_eval_count: parsed.prompt_eval_count,
-                                prompt_eval_duration: parsed.prompt_eval_duration,
-                                eval_count: parsed.eval_count,
-                                eval_duration: parsed.eval_duration,
-                                model: parsed.model
-                            };
-                            
-                            resolve({
-                                thinking: thinkingContent || finalExtracted.thinking,
-                                content: finalExtracted.content || 'No response',
-                                stats: stats
-                            });
-                        }
-                    } catch (e) {
-                        console.error('Parse error:', e);
-                    }
-                }
-            });
-
-            res.on('end', () => {
-                if (rawContent || thinkingContent) {
-                    const finalExtracted = extractThinkTags(rawContent);
-                    resolve({
-                        thinking: thinkingContent || finalExtracted.thinking,
-                        content: finalExtracted.content || 'No response',
-                        stats: {} // No stats available in this case
-                    });
-                }
-            });
-        });
-
-        req.on('error', (err) => {
-            console.error('Request error:', err);
-            reject(err);
-        });
-
-        req.write(postData);
-        req.end();
-    });
-});
-
-// MCP Tools message handler (separate from DeepSearch)
-ipcMain.handle('send-mcp-message', async (event, { model, messages, enabledToolIds }) => {
-    console.log('MCP Tools mode:', { model, messageCount: messages.length, tools: enabledToolIds });
-    
-    // Get only the enabled MCP tools
-    const mcpTools = getOllamaToolDefinitions().filter(t => {
-        const toolId = t.function.name.replace('mcp_', '');
-        return enabledToolIds.includes(toolId);
-    });
-    
-    if (mcpTools.length === 0) {
-        // No tools enabled, fall back to normal message
-        return new Promise((resolve, reject) => {
-            const postData = JSON.stringify({ model, messages, stream: false });
-            const options = {
-                hostname: ollamaHost,
-                port: 11434,
-                path: '/api/chat',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-                timeout: 60000
-            };
-            const req = http.request(options, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                    try {
-                        const parsed = JSON.parse(data);
-                        resolve({ thinking: parsed.message?.thinking || '', content: parsed.message?.content || 'No response' });
-                    } catch (e) { reject(e); }
-                });
-            });
-            req.on('error', reject);
-            req.write(postData);
-            req.end();
-        });
-    }
-    
-    // Build tool descriptions for system prompt
-    const toolDescriptions = mcpTools.map(t => `- **${t.function.name}**: ${t.function.description}`).join('\n');
-    
-    const systemPrompt = {
-        role: 'system',
-        content: `You are a helpful AI assistant with access to the following tools:
-
-${toolDescriptions}
-
-IMPORTANT: When the user asks about topics these tools can help with, USE THEM. For example:
-- Weather questions → use mcp_weather tool
-- Always use the actual data from tool results, never make up information.
-- After using a tool, present the information in a clear, helpful way.`
     };
     
-    let allMessages = [systemPrompt, ...messages];
-    let finalResponse = { thinking: '', content: '' };
-    let iterations = 0;
-    const maxIterations = 5;
-
-    while (iterations < maxIterations) {
-        iterations++;
-        
-        const postData = JSON.stringify({
-            model: model,
-            messages: allMessages,
-            tools: mcpTools,
-            stream: false
-        });
-
+    const onContent = (content) => {
         try {
-            const response = await new Promise((resolve, reject) => {
-                const options = {
-                    hostname: ollamaHost,
-                    port: 11434,
-                    path: '/api/chat',
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-                    timeout: 120000
-                };
-                const req = http.request(options, (res) => {
-                    let data = '';
-                    res.on('data', chunk => data += chunk);
-                    res.on('end', () => {
-                        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
-                    });
-                });
-                req.on('error', reject);
-                req.write(postData);
-                req.end();
-            });
-
-            if (response.message?.tool_calls && response.message.tool_calls.length > 0) {
-                allMessages.push(response.message);
-                
-                for (const toolCall of response.message.tool_calls) {
-                    const toolName = toolCall.function.name;
-                    const toolArgs = toolCall.function.arguments;
-                    const toolId = toolName.replace('mcp_', '');
-                    
-                    console.log(`Executing MCP tool: ${toolId}`, toolArgs);
-                    
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('mcp-tool-use', { tool: toolName, args: toolArgs, status: 'executing' });
-                    }
-                    
-                    const result = await executeTool(toolId, toolArgs);
-                    
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('mcp-tool-use', { tool: toolName, args: toolArgs, status: 'complete', result });
-                    }
-                    
-                    allMessages.push({ role: 'tool', content: JSON.stringify(result) });
-                }
-            } else {
-                finalResponse = {
-                    thinking: response.message?.thinking || '',
-                    content: response.message?.content || 'No response'
-                };
-                break;
+            if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+                mainWindow.webContents.send('ollama-message-update', content);
             }
-        } catch (error) {
-            console.error('MCP Tools error:', error);
-            finalResponse = { thinking: '', content: `Error: ${error.message}` };
-            break;
+        } catch (err) {
+            console.error('Error sending message update:', err.message);
         }
-    }
+    };
 
-    if (iterations >= maxIterations) {
-        console.log('MCP: Reached maximum tool iterations');
+    try {
+        const response = await ollama.chat({ model, messages, host }, onThinking, onContent);
+        console.log('Stream complete');
+        return response;
+    } catch (error) {
+        console.error('Ollama chat error:', error);
+        throw error;
     }
-
-    return finalResponse;
 });
 
 // DeepSearch message handler with tool use
@@ -437,6 +271,8 @@ function compressContent(content, maxLength = 2000) {
 ipcMain.handle('send-deepsearch-message', async (event, { model, messages }) => {
     console.log('DeepSearch mode:', { model, messageCount: messages.length });
     
+    const host = `http://${ollamaHost}:11434`;
+    
     // Compress messages for smaller models
     const compressedMessages = compressMessages(messages).map(msg => ({
         ...msg,
@@ -444,23 +280,10 @@ ipcMain.handle('send-deepsearch-message', async (event, { model, messages }) => 
     }));
     
     const tools = getDeepSearchTools();
-    
-    // Build dynamic system prompt based on available tools
-    const mcpToolsList = tools
-        .filter(t => t.function.name.startsWith('mcp_'))
-        .map(t => `- **${t.function.name}**: ${t.function.description}`)
-        .join('\n');
-    
-    const mcpSection = mcpToolsList ? `
-
-Additionally, you have access to these MCP tools:
-${mcpToolsList}
-
-Use MCP tools when the user asks about topics they cover (e.g., use mcp_weather for weather questions).` : '';
 
     const systemPrompt = {
         role: 'system',
-        content: `You have tools: web_search, system_search, list_directory, read_file.${mcpSection ? ' ' + mcpSection : ''}
+        content: `You have tools: web_search, system_search, list_directory, read_file.
 
 USE tools when needed:
 - web_search: Current events, news, facts you're unsure about
@@ -489,150 +312,61 @@ You MUST follow these rules for your internal thinking:
     console.log(`Messages compressed: ${messages.length} → ${compressedMessages.length}`);
     let finalResponse = { thinking: '', content: '' };
     let iterations = 0;
-    const maxIterations = 2; // Usually 1 tool call + 1 response is enough
-    
-    // Accumulate thinking across all iterations
+    const maxIterations = 2;
     let accumulatedThinking = '';
+
+    const modelOptions = {
+        num_predict: 2048,
+        temperature: 0.7,
+        top_k: 40,
+        top_p: 0.9,
+        repeat_penalty: 1.8,
+        repeat_last_n: 256
+    };
 
     while (iterations < maxIterations) {
         iterations++;
-        
-        const postData = JSON.stringify({
-            model: model,
-            messages: allMessages,
-            tools: tools,
-            stream: true,
-            options: {
-                num_predict: 2048,      // Enough for full response
-                temperature: 0.7,       // Balanced
-                top_k: 40,
-                top_p: 0.9,
-                repeat_penalty: 1.8,    // Very strong penalty for loops
-                repeat_last_n: 256      // Look back far
+
+        // Callbacks for streaming
+        const onThinking = (thinking) => {
+            const combinedThinking = accumulatedThinking 
+                ? accumulatedThinking + '\n\n' + thinking 
+                : thinking;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('ollama-thinking-update', combinedThinking);
             }
-        });
+        };
+        
+        const onContent = (content) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('ollama-message-update', content);
+            }
+        };
 
         try {
-            const response = await new Promise((resolve, reject) => {
-                const options = {
-                    hostname: ollamaHost,
-                    port: 11434,
-                    path: '/api/chat',
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': Buffer.byteLength(postData)
-                    },
-                    timeout: 60000
-                };
-
-                let thinkingContent = '';
-                let messageContent = '';
-                let rawContent = ''; // Track raw content for <think> tag extraction
-                let toolCalls = null;
-                let finalMessage = null;
-
-                const req = http.request(options, (res) => {
-                    let buffer = '';
-                    
-                    res.on('data', chunk => {
-                        buffer += chunk.toString();
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-                        
-                        for (const line of lines) {
-                            if (!line.trim()) continue;
-                            try {
-                                const json = JSON.parse(line);
-                                
-                                // Handle native thinking field
-                                if (json.message?.thinking) {
-                                    thinkingContent += json.message.thinking;
-                                    const combinedThinking = accumulatedThinking 
-                                        ? accumulatedThinking + '\n\n' + thinkingContent 
-                                        : thinkingContent;
-                                    if (mainWindow && !mainWindow.isDestroyed()) {
-                                        mainWindow.webContents.send('ollama-thinking-update', combinedThinking);
-                                    }
-                                }
-                                
-                                // Stream content updates with <think> tag extraction
-                                if (json.message?.content) {
-                                    rawContent += json.message.content;
-                                    
-                                    // Extract <think> tags from content
-                                    const extracted = extractThinkTags(rawContent);
-                                    
-                                    // Update thinking if found in content
-                                    if (extracted.thinking && extracted.thinking !== thinkingContent) {
-                                        thinkingContent = extracted.thinking;
-                                        const combinedThinking = accumulatedThinking 
-                                            ? accumulatedThinking + '\n\n' + thinkingContent 
-                                            : thinkingContent;
-                                        if (mainWindow && !mainWindow.isDestroyed()) {
-                                            mainWindow.webContents.send('ollama-thinking-update', combinedThinking);
-                                        }
-                                    }
-                                    
-                                    // Send clean content
-                                    messageContent = extracted.content;
-                                    if (mainWindow && !mainWindow.isDestroyed()) {
-                                        mainWindow.webContents.send('ollama-message-update', messageContent);
-                                    }
-                                }
-                                
-                                // Capture tool calls
-                                if (json.message?.tool_calls) {
-                                    toolCalls = json.message.tool_calls;
-                                }
-                                
-                                // Final message
-                                if (json.done) {
-                                    const finalExtracted = extractThinkTags(rawContent);
-                                    finalMessage = {
-                                        message: {
-                                            thinking: thinkingContent || finalExtracted.thinking,
-                                            content: finalExtracted.content,
-                                            tool_calls: toolCalls
-                                        }
-                                    };
-                                }
-                            } catch (e) {
-                                // Skip invalid JSON lines
-                            }
-                        }
-                    });
-                    
-                    res.on('end', () => {
-                        resolve(finalMessage || { message: { thinking: thinkingContent, content: messageContent, tool_calls: toolCalls } });
-                    });
-                });
-
-                req.on('error', reject);
-                req.write(postData);
-                req.end();
-            });
+            const response = await ollama.chatWithTools(
+                { model, messages: allMessages, tools, host, modelOptions },
+                onThinking,
+                onContent
+            );
 
             // Check for tool calls
             if (response.message?.tool_calls && response.message.tool_calls.length > 0) {
-                // Accumulate thinking from this iteration before processing tools
                 if (response.message?.thinking) {
                     accumulatedThinking = accumulatedThinking 
                         ? accumulatedThinking + '\n\n' + response.message.thinking
                         : response.message.thinking;
                 }
                 
-                // Add assistant message with tool calls
                 allMessages.push(response.message);
                 
-                // Aggressively deduplicate tool calls - only keep first of each tool type
+                // Deduplicate tool calls
                 const seenTools = new Set();
                 const seenQueries = new Set();
                 const uniqueToolCalls = response.message.tool_calls.filter(toolCall => {
                     const toolName = toolCall.function.name;
                     const args = toolCall.function.arguments || {};
                     
-                    // For web_search, only allow ONE call total (first one wins)
                     if (toolName === 'web_search') {
                         const query = (args.query || '').toLowerCase().trim();
                         if (seenTools.has('web_search') || seenQueries.has(query)) {
@@ -644,7 +378,6 @@ You MUST follow these rules for your internal thinking:
                         return true;
                     }
                     
-                    // For other tools, dedupe by tool+args
                     const key = `${toolName}:${JSON.stringify(args)}`;
                     if (seenQueries.has(key)) {
                         console.log(`Skipping duplicate tool call: ${toolName}`);
@@ -656,35 +389,27 @@ You MUST follow these rules for your internal thinking:
                 
                 console.log(`Tool calls: ${response.message.tool_calls.length} -> ${uniqueToolCalls.length} after dedup`);
                 
-                // Execute unique tool calls in PARALLEL for speed
+                // Execute tools in parallel
                 const toolPromises = uniqueToolCalls.map(async (toolCall) => {
                     const toolName = toolCall.function.name;
                     const toolArgs = toolCall.function.arguments;
                     
                     console.log(`Executing tool: ${toolName}`, toolArgs);
                     
-                    // Send tool use update to frontend
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('deepsearch-tool-use', {
-                            tool: toolName,
-                            args: toolArgs,
-                            status: 'executing'
+                            tool: toolName, args: toolArgs, status: 'executing'
                         });
                     }
                     
                     const result = await executeToolCall(toolName, toolArgs);
                     
-                    // Send tool result update
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('deepsearch-tool-use', {
-                            tool: toolName,
-                            args: toolArgs,
-                            status: 'complete',
-                            result: result
+                            tool: toolName, args: toolArgs, status: 'complete', result
                         });
                     }
                     
-                    // Format result for better model understanding
                     let formattedContent = '';
                     if (result.success && result.results && result.results.length > 0) {
                         formattedContent = `Search results for "${toolArgs.query}":\n\n`;
@@ -695,20 +420,13 @@ You MUST follow these rules for your internal thinking:
                         formattedContent = JSON.stringify(result);
                     }
                     
-                    return {
-                        role: 'tool',
-                        content: formattedContent
-                    };
+                    return { role: 'tool', content: formattedContent };
                 });
                 
-                // Wait for all tools to complete
                 const toolResults = await Promise.all(toolPromises);
                 allMessages.push(...toolResults);
-                
                 console.log('Tool results added to messages, continuing conversation...');
             } else {
-                // No tool calls, we have the final response
-                // Combine accumulated thinking with final thinking
                 const finalThinking = accumulatedThinking 
                     ? (response.message?.thinking 
                         ? accumulatedThinking + '\n\n' + response.message.thinking
@@ -733,7 +451,6 @@ You MUST follow these rules for your internal thinking:
 
     if (iterations >= maxIterations) {
         console.log('DeepSearch: Reached maximum tool iterations');
-        // If we hit max iterations, make sure we have the accumulated thinking
         if (!finalResponse.thinking && accumulatedThinking) {
             finalResponse.thinking = accumulatedThinking;
         }
@@ -805,28 +522,6 @@ ipcMain.handle('hf-download-model', async (event, modelId) => {
 
 ipcMain.handle('hf-get-user-info', async () => {
     return getUserInfo();
-});
-
-// MCP Tools IPC Handlers
-ipcMain.handle('mcp-get-tools', async () => {
-    return getTools();
-});
-
-ipcMain.handle('mcp-toggle-tool', async (event, { toolId, enabled }) => {
-    return toggleTool(toolId, enabled);
-});
-
-ipcMain.handle('mcp-refresh-tools', async () => {
-    return refreshTools();
-});
-
-ipcMain.handle('mcp-execute-tool', async (event, { toolId, input }) => {
-    return executeTool(toolId, input);
-});
-
-ipcMain.handle('mcp-open-tools-folder', async () => {
-    openToolsFolder();
-    return { success: true };
 });
 
 // Open external links in system browser
@@ -1096,10 +791,27 @@ ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPro
 
 app.whenReady().then(async () => {
     console.log('=== Electron App Starting ===');
+    
+    // Try to connect to Ollama (optional - app works without it)
+    console.log('Checking for Ollama...');
+    const ollamaRunning = await ollamaManager.isServerRunning();
+    if (ollamaRunning) {
+        console.log('✓ Ollama server detected');
+    } else {
+        console.log('ℹ Ollama not running - local GGUF models available via node-llama-cpp');
+    }
+    
+    // Initialize local LLM support
+    console.log('Initializing local LLM support (node-llama-cpp)...');
+    try {
+        await localLlama.initLlama();
+        console.log('✓ Local LLM ready');
+    } catch (error) {
+        console.log('⚠ Local LLM init deferred (will init on first use)');
+    }
+    
     console.log('Initializing database...');
     initDatabase();
-    console.log('Initializing MCP handler...');
-    initMcpHandler();
     console.log('Initializing DeepSearch browser...');
     await initBrowser(); // Pre-start browser for faster searches
     
@@ -1129,7 +841,6 @@ app.whenReady().then(async () => {
     console.log('- Model scanner handlers: scan-models-folder, scan-diffusion-models, get-model-info');
     console.log('- Image generation handlers: generate-image, load-image-model, check-python-setup');
     console.log('- Hugging Face handlers: hf-set-token, hf-load-token, hf-clear-token, hf-search-models, hf-download-model, hf-get-user-info');
-    console.log('- MCP handlers: mcp-get-tools, mcp-toggle-tool, mcp-refresh-tools, mcp-execute-tool, mcp-open-tools-folder');
     console.log('Creating window...');
     createWindow();
 
@@ -1139,9 +850,6 @@ app.whenReady().then(async () => {
         }
     });
 });
-
-let ollamaHost = '127.0.0.1';
-let lastOllamaStatus = 'stopped';
 
 function checkOllamaStatus(win) {
     if (!win || win.isDestroyed()) return;
@@ -1279,558 +987,19 @@ ipcMain.handle('save-settings', async (event, settings) => {
     }
 });
 
-// IDE File System Handlers
-const projectsFolder = path.join(__dirname, '..', 'projects');
-
-// Ensure projects folder exists
-if (!fs.existsSync(projectsFolder)) {
-    fs.mkdirSync(projectsFolder, { recursive: true });
-}
-
-ipcMain.handle('ide-get-projects-folder', async () => {
-    return { success: true, folderPath: projectsFolder };
-});
-
-ipcMain.handle('ide-create-project', async (event, projectName) => {
-    try {
-        const projectPath = path.join(projectsFolder, projectName);
-        if (fs.existsSync(projectPath)) {
-            return { success: false, error: 'Project already exists' };
-        }
-        fs.mkdirSync(projectPath, { recursive: true });
-        // Create basic files
-        fs.writeFileSync(path.join(projectPath, 'README.md'), `# ${projectName}\n\nNew project created with OpenMind IDE.`);
-        return { success: true, projectPath };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-list-projects', async () => {
-    try {
-        if (!fs.existsSync(projectsFolder)) {
-            return { success: true, projects: [] };
-        }
-        const entries = fs.readdirSync(projectsFolder, { withFileTypes: true });
-        const projects = entries
-            .filter(e => e.isDirectory())
-            .map(e => ({
-                name: e.name,
-                path: path.join(projectsFolder, e.name)
-            }));
-        return { success: true, projects };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-select-folder', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory']
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-        return { success: false };
-    }
-    return { success: true, folderPath: result.filePaths[0] };
-});
-
-ipcMain.handle('ide-read-directory', async (event, folderPath) => {
-    try {
-        const items = [];
-        const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-        
-        for (const entry of entries) {
-            const fullPath = path.join(folderPath, entry.name);
-            const stats = fs.statSync(fullPath);
-            items.push({
-                name: entry.name,
-                path: fullPath,
-                isDirectory: entry.isDirectory(),
-                size: stats.size,
-                modified: stats.mtime
-            });
-        }
-        
-        // Sort: folders first, then files, alphabetically
-        items.sort((a, b) => {
-            if (a.isDirectory && !b.isDirectory) return -1;
-            if (!a.isDirectory && b.isDirectory) return 1;
-            return a.name.localeCompare(b.name);
-        });
-        
-        return { success: true, items };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-create-file', async (event, { filePath, content = '' }) => {
-    try {
-        fs.writeFileSync(filePath, content, 'utf8');
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-create-folder', async (event, folderPath) => {
-    try {
-        fs.mkdirSync(folderPath, { recursive: true });
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-get-stats', async (event, filePath) => {
-    try {
-        const stats = fs.statSync(filePath);
-        return { 
-            success: true, 
-            isDirectory: stats.isDirectory(),
-            isFile: stats.isFile(),
-            size: stats.size,
-            modified: stats.mtime
-        };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-read-file', async (event, filePath) => {
-    try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        return { success: true, content };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-save-file', async (event, { filePath, content }) => {
-    try {
-        fs.writeFileSync(filePath, content, 'utf8');
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-delete-file', async (event, filePath) => {
-    try {
-        const stats = fs.statSync(filePath);
-        if (stats.isDirectory()) {
-            fs.rmSync(filePath, { recursive: true });
-        } else {
-            fs.unlinkSync(filePath);
-        }
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('ide-rename-file', async (event, { oldPath, newPath }) => {
-    try {
-        fs.renameSync(oldPath, newPath);
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-// Check if folder is a git repository
-ipcMain.handle('ide-git-status', async (event, rootPath) => {
-    try {
-        const gitDir = path.join(rootPath, '.git');
-        if (!fs.existsSync(gitDir)) {
-            return { success: true, isRepo: false };
-        }
-        
-        // Read HEAD to get current branch
-        const headPath = path.join(gitDir, 'HEAD');
-        const headContent = fs.readFileSync(headPath, 'utf8').trim();
-        let branch = 'HEAD';
-        if (headContent.startsWith('ref: refs/heads/')) {
-            branch = headContent.replace('ref: refs/heads/', '');
-        }
-        
-        return { success: true, isRepo: true, branch };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-// Search in files
-ipcMain.handle('ide-search-files', async (event, { rootPath, query, options = {} }) => {
-    try {
-        const results = [];
-        const { caseSensitive = false, wholeWord = false, useRegex = false } = options;
-        
-        // Build search pattern
-        let pattern = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (wholeWord) {
-            pattern = `\\b${pattern}\\b`;
-        }
-        const flags = caseSensitive ? 'g' : 'gi';
-        let searchRegex;
-        try {
-            searchRegex = new RegExp(pattern, flags);
-        } catch (e) {
-            return { success: false, error: 'Invalid search pattern' };
-        }
-        
-        const searchDir = async (dirPath) => {
-            let entries;
-            try {
-                entries = fs.readdirSync(dirPath, { withFileTypes: true });
-            } catch (e) {
-                return;
-            }
-            
-            for (const entry of entries) {
-                // Skip hidden folders, node_modules, dist, build
-                if (entry.name.startsWith('.') || 
-                    entry.name === 'node_modules' || 
-                    entry.name === 'dist' ||
-                    entry.name === 'build' ||
-                    entry.name === '.git') continue;
-                
-                const fullPath = path.join(dirPath, entry.name);
-                
-                if (entry.isDirectory()) {
-                    await searchDir(fullPath);
-                } else {
-                    // Skip binary and large files
-                    const ext = entry.name.split('.').pop()?.toLowerCase();
-                    const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'ico', 'svg', 'woff', 'woff2', 'ttf', 'eot', 'mp3', 'mp4', 'zip', 'tar', 'gz', 'pdf'];
-                    if (binaryExts.includes(ext)) continue;
-                    
-                    try {
-                        const stats = fs.statSync(fullPath);
-                        if (stats.size > 1024 * 1024) continue; // Skip files > 1MB
-                        
-                        const content = fs.readFileSync(fullPath, 'utf8');
-                        const lines = content.split('\n');
-                        
-                        lines.forEach((line, index) => {
-                            searchRegex.lastIndex = 0;
-                            if (searchRegex.test(line)) {
-                                results.push({
-                                    file: fullPath,
-                                    fileName: entry.name,
-                                    line: index + 1,
-                                    content: line.trim().substring(0, 300),
-                                    relativePath: path.relative(rootPath, path.dirname(fullPath))
-                                });
-                            }
-                        });
-                    } catch (e) {
-                        // Skip unreadable files
-                    }
-                }
-                
-                // Limit results
-                if (results.length >= 500) return;
-            }
-        };
-        
-        await searchDir(rootPath);
-        return { success: true, results };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-// Terminal Process Management using node-pty for real PTY support
-const terminalProcesses = new Map();
-let terminalIdCounter = 0;
-let pty = null;
-
-// Try to load node-pty (using prebuilt multiarch version)
-try {
-    pty = require('@homebridge/node-pty-prebuilt-multiarch');
-    console.log('node-pty loaded successfully (prebuilt-multiarch)');
-} catch (err) {
-    console.warn('node-pty not available, falling back to spawn:', err.message);
-}
-
-ipcMain.handle('terminal-create', async (event, { cwd }) => {
-    const os = require('os');
-    
-    console.log('Creating terminal with cwd:', cwd);
-    
-    const terminalId = ++terminalIdCounter;
-    const isWindows = process.platform === 'win32';
-    
-    const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
-    const workingDir = cwd || os.homedir();
-    
-    // Verify the directory exists
-    const fs = require('fs');
-    if (!fs.existsSync(workingDir)) {
-        console.error('Terminal cwd does not exist:', workingDir);
-        return { success: false, error: 'Directory does not exist' };
-    }
-    
-    try {
-        let terminalProcess;
-        
-        if (pty) {
-            // Use node-pty for real PTY support (like VS Code)
-            const shellArgs = isWindows ? ['-NoLogo'] : [];
-            
-            // Build environment - inherit all system env vars
-            // Force English output for consistent terminal experience
-            const termEnv = Object.assign({}, process.env, {
-                TERM: 'xterm-256color',
-                COLORTERM: 'truecolor',
-                TERM_PROGRAM: 'OpenMind',
-                TERM_PROGRAM_VERSION: '1.0.0',
-                // Force English locale
-                LANG: 'en_US.UTF-8',
-                LC_ALL: 'C',
-                // PowerShell/Windows specific - force English output
-                DOTNET_CLI_UI_LANGUAGE: 'en',
-                VSLANG: '1033', // English locale ID
-                PreferredUILang: 'en-US',
-                POWERSHELL_TELEMETRY_OPTOUT: '1'
-            });
-            
-            terminalProcess = pty.spawn(shell, shellArgs, {
-                name: 'xterm-256color',
-                cols: 80,
-                rows: 24,
-                cwd: workingDir,
-                env: termEnv,
-                useConpty: isWindows,
-                conptyInheritCursor: false
-            });
-            
-            // Handle PTY data
-            terminalProcess.onData((data) => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-output', { 
-                        terminalId, 
-                        data: data,
-                        type: 'stdout'
-                    });
-                }
-            });
-            
-            terminalProcess.onExit(({ exitCode }) => {
-                console.log('PTY exited with code:', exitCode);
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-exit', { terminalId, code: exitCode });
-                }
-                terminalProcesses.delete(terminalId);
-            });
-            
-            terminalProcesses.set(terminalId, {
-                process: terminalProcess,
-                cwd: workingDir,
-                shell: isWindows ? 'powershell' : 'bash',
-                isPty: true
-            });
-        } else {
-            // Fallback to spawn if node-pty is not available
-            const { spawn } = require('child_process');
-            const shellArgs = isWindows ? ['-NoLogo'] : ['-i'];
-            
-            // Build environment - inherit all system env vars
-            // Force English output
-            const termEnv = Object.assign({}, process.env, {
-                TERM: 'xterm-256color',
-                COLORTERM: 'truecolor',
-                TERM_PROGRAM: 'OpenMind',
-                LANG: 'en_US.UTF-8',
-                LC_ALL: 'en_US.UTF-8'
-            });
-            
-            terminalProcess = spawn(shell, shellArgs, {
-                cwd: workingDir,
-                env: termEnv,
-                shell: false,
-                stdio: ['pipe', 'pipe', 'pipe']
-            });
-            
-            terminalProcess.stdout.on('data', (data) => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-output', { 
-                        terminalId, 
-                        data: data.toString(),
-                        type: 'stdout'
-                    });
-                }
-            });
-            
-            terminalProcess.stderr.on('data', (data) => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-output', { 
-                        terminalId, 
-                        data: data.toString(),
-                        type: 'stderr'
-                    });
-                }
-            });
-            
-            terminalProcess.on('close', (code) => {
-                console.log('Terminal closed with code:', code);
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-exit', { terminalId, code });
-                }
-                terminalProcesses.delete(terminalId);
-            });
-            
-            terminalProcesses.set(terminalId, {
-                process: terminalProcess,
-                cwd: workingDir,
-                shell: isWindows ? 'powershell' : 'bash',
-                isPty: false
-            });
-        }
-        
-        console.log('Terminal created successfully:', terminalId, 'PTY:', !!pty);
-        
-        return { 
-            success: true, 
-            terminalId,
-            shell: isWindows ? 'powershell' : 'bash',
-            cwd: workingDir,
-            isPty: !!pty
-        };
-    } catch (error) {
-        console.error('Failed to create terminal:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('terminal-write', async (event, { terminalId, data }) => {
-    const terminal = terminalProcesses.get(terminalId);
-    if (!terminal) {
-        return { success: false, error: 'Terminal not found' };
-    }
-    
-    try {
-        if (terminal.isPty) {
-            // node-pty uses write() directly
-            terminal.process.write(data);
-        } else {
-            // spawn uses stdin.write()
-            terminal.process.stdin.write(data);
-        }
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('terminal-resize', async (event, { terminalId, cols, rows }) => {
-    const terminal = terminalProcesses.get(terminalId);
-    if (!terminal) {
-        return { success: false, error: 'Terminal not found' };
-    }
-    
-    try {
-        if (terminal.isPty && terminal.process.resize) {
-            terminal.process.resize(cols, rows);
-        }
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('terminal-kill', async (event, { terminalId }) => {
-    const terminal = terminalProcesses.get(terminalId);
-    if (!terminal) {
-        return { success: false, error: 'Terminal not found' };
-    }
-    
-    try {
-        if (terminal.isPty) {
-            terminal.process.kill();
-        } else {
-            terminal.process.kill();
-        }
-        terminalProcesses.delete(terminalId);
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('terminal-list', async () => {
-    const terminals = [];
-    for (const [id, terminal] of terminalProcesses) {
-        terminals.push({
-            id,
-            cwd: terminal.cwd,
-            shell: terminal.shell
-        });
-    }
-    return { success: true, terminals };
-});
-
-// Run a single command and return output (for simple execution)
-ipcMain.handle('terminal-run-command', async (event, { command, cwd }) => {
-    const { exec } = require('child_process');
-    const os = require('os');
-    
-    return new Promise((resolve) => {
-        exec(command, { 
-            cwd: cwd || os.homedir(),
-            maxBuffer: 1024 * 1024 * 10, // 10MB buffer
-            timeout: 60000 // 60 second timeout
-        }, (error, stdout, stderr) => {
-            resolve({
-                success: !error,
-                output: stdout,
-                error: stderr || (error ? error.message : null),
-                code: error ? error.code : 0
-            });
-        });
-    });
-});
-
-// Code Analysis IPC Handlers
-ipcMain.handle('analyze-code', async (event, { filePath, content }) => {
-    try {
-        const result = analyzeFile(filePath, content);
-        return { success: true, problems: result };
-    } catch (error) {
-        console.error('Code analysis error:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('analyze-workspace', async (event, { rootPath }) => {
-    try {
-        const result = await analyzeWorkspace(rootPath);
-        return { success: true, problems: result };
-    } catch (error) {
-        console.error('Workspace analysis error:', error);
-        return { success: false, error: error.message };
-    }
-});
-
 app.on('window-all-closed', async () => {
-    // Kill all terminal processes
-    for (const [id, terminal] of terminalProcesses) {
-        try {
-            terminal.process.kill();
-        } catch (e) {
-            // Ignore
-        }
-    }
-    terminalProcesses.clear();
-    
     // Close DeepSearch browser
     await closeBrowser();
     
     // Stop image generation process
     imageGen.stopProcess();
     
+    // Stop Ollama server if we started it
+    ollamaManager.stopServer();
+    
     if (process.platform !== 'darwin') {
         app.quit();
     }
 });
+
+

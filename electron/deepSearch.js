@@ -4,7 +4,6 @@ const { exec, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { getOllamaToolDefinitions, executeTool: executeMcpTool, getEnabledTools } = require('./mcpHandler');
 
 let puppeteer = null;
 let browserPath = null;
@@ -911,22 +910,13 @@ function getDeepSearchTools() {
     }
   ];
   
-  // Add enabled MCP tools
-  const mcpTools = getOllamaToolDefinitions();
-  return [...baseTools, ...mcpTools];
+  return baseTools;
 }
 
 // Get Research Mode tools (subset for research)
 // Execute a tool call
 async function executeToolCall(toolName, args) {
   console.log('executeToolCall:', toolName, JSON.stringify(args));
-  
-  // Check for MCP tools first (they start with mcp_)
-  if (toolName.startsWith('mcp_')) {
-    const mcpToolId = toolName.replace('mcp_', '');
-    console.log(`Executing MCP tool: ${mcpToolId}`, args);
-    return await executeMcpTool(mcpToolId, args);
-  }
   
   switch (toolName) {
     case 'web_search':

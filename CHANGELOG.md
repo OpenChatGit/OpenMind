@@ -4,6 +4,18 @@ All notable changes to OpenMind will be documented in this file.
 
 ## [Unreleased]
 
+### 🎨 Retro Synthwave Theme (Visual Flair)
+- ✅ **80s Synthwave Animation** - Retro grid with perspective effect and animated sun
+- ✅ **Audio-Reactive Visualizer** - Outer circle waves that react to the background music
+- ✅ **Symmetrical Wave Effect** - Mirrored frequency visualization on both sides
+- ✅ **Background Music Playlist** - Three synthwave tracks included:
+  - "Technological Revolution" by Pecan Pie
+  - "Arcade Ride" by Vens Adams
+  - "Open Veil" by Lily
+- ✅ **Volume Slider with Hover** - Slide-out volume control on hover
+- ✅ **Music Credits** - Clickable artist links in the corner
+- ⚠️ **Note:** This is purely visual flair - it doesn't affect any app functionality!
+
 ### Welcome & Notifications
 - ✅ **Welcome Tab** - Beautiful welcome screen with quick actions and features overview
 - ✅ **What's New** - Changelog viewer showing latest updates
@@ -22,36 +34,7 @@ All notable changes to OpenMind will be documented in this file.
 - 🧪 **File Icon Colors** - File and folder icons use colorblind-friendly colors
 - ⚠️ **Note:** Colorblind mode is experimental and may not cover all UI elements yet
 
-### Terminal Enhancements
-- ✅ **Multi-Terminal Support** - Create and manage multiple terminal instances
-- ✅ **Terminal Sidebar** - VS Code-style sidebar for quick terminal switching
-- ✅ **Context Menu** - Right-click on terminals for quick actions:
-  - Rename terminal
-  - Copy selection
-  - Clear terminal
-  - Kill terminal
-  - Kill other terminals
-  - Kill all terminals
-- ✅ **Rename Dialog** - Give custom names to your terminals
-
-### File Icons
-- ✅ **Seti UI Icons** - VS Code-style file icons from the official Seti UI theme
-- ✅ **100+ file type icons** - JavaScript, TypeScript, React, Python, and many more
-- ✅ **Proper icon alignment** - Icons are consistently sized and aligned
-- ✅ **Folder styling** - Clean folder display without icons (VS Code style)
-
-## [0.2.0] - IDE Mode
-
-### IDE Mode (NEW!)
-- ✅ **Built-in IDE** - VS Code-style code editor integrated into the app
-- ✅ **File Explorer** - Full file system navigation with context menus
-- ✅ **Syntax Highlighting** - Support for 30+ programming languages
-- ✅ **Integrated Terminal** - Full terminal with PowerShell/Bash support
-- ✅ **AI Chat Sidebar** - Ask questions about your code while editing
-- ✅ **Search in Files** - Find text across your entire project
-- ✅ **Tab Management** - Multiple files with unsaved changes tracking
-- ✅ **Markdown Preview** - Preview markdown files with styling
-- ✅ **Performance Optimized** - Memoized components to prevent unnecessary re-renders
+## [0.2.0] - Image Generation & UI
 
 ### Image Generation Improvements
 - ✅ **CUDA/GPU Support** - Fast image generation with NVIDIA GPUs
@@ -73,7 +56,6 @@ All notable changes to OpenMind will be documented in this file.
 - 🎨 Local image generation with GGUF models
 - 📎 Image attachments via file picker or clipboard
 - 🔍 DeepSearch web search integration
-- 🔌 MCP Tools support
 - 📊 Inference stats display
 - 🔄 Response regeneration
 - 📋 One-click copy responses

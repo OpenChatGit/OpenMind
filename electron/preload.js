@@ -7,15 +7,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     minimize: () => ipcRenderer.send('minimize-window'),
     maximize: () => ipcRenderer.send('maximize-window'),
     close: () => ipcRenderer.send('close-window'),
+    
+    // Ollama Server Management (with bundled binary)
+    getOllamaServerStatus: () => ipcRenderer.invoke('get-ollama-server-status'),
+    startOllamaServer: () => ipcRenderer.invoke('start-ollama-server'),
+    stopOllamaServer: () => ipcRenderer.invoke('stop-ollama-server'),
+    downloadOllama: () => ipcRenderer.invoke('download-ollama'),
+    checkOllamaUpdates: () => ipcRenderer.invoke('check-ollama-updates'),
+    onOllamaServerLog: (callback) => ipcRenderer.on('ollama-server-log', (event, log) => callback(log)),
+    onOllamaDownloadProgress: (callback) => ipcRenderer.on('ollama-download-progress', (event, data) => callback(data)),
+    onOllamaInitProgress: (callback) => ipcRenderer.on('ollama-init-progress', (event, data) => callback(data)),
+    
+    // Ollama API
     onOllamaStatus: (callback) => ipcRenderer.on('ollama-status', (event, status) => callback(status)),
     onOllamaConnected: (callback) => ipcRenderer.on('ollama-connected', () => callback()),
     getOllamaModels: () => ipcRenderer.invoke('get-ollama-models'),
+    pullOllamaModel: (modelName) => ipcRenderer.invoke('pull-ollama-model', modelName),
+    deleteOllamaModel: (modelName) => ipcRenderer.invoke('delete-ollama-model', modelName),
+    getOllamaModelInfo: (modelName) => ipcRenderer.invoke('get-ollama-model-info', modelName),
+    onOllamaPullProgress: (callback) => ipcRenderer.on('ollama-pull-progress', (event, data) => callback(data)),
     sendOllamaMessage: (model, messages) => ipcRenderer.invoke('send-ollama-message', { model, messages }),
     sendDeepSearchMessage: (model, messages) => ipcRenderer.invoke('send-deepsearch-message', { model, messages }),
     
     onThinkingUpdate: (callback) => ipcRenderer.on('ollama-thinking-update', (event, thinking) => callback(thinking)),
     onMessageUpdate: (callback) => ipcRenderer.on('ollama-message-update', (event, message) => callback(message)),
     onDeepSearchToolUse: (callback) => ipcRenderer.on('deepsearch-tool-use', (event, data) => callback(data)),
+    
+    // Local LLM API (node-llama-cpp - no Ollama needed!)
+    getLocalModels: () => ipcRenderer.invoke('get-local-models'),
+    loadLocalModel: (modelPath) => ipcRenderer.invoke('load-local-model', modelPath),
+    unloadLocalModel: () => ipcRenderer.invoke('unload-local-model'),
+    getLocalLlmStatus: () => ipcRenderer.invoke('get-local-llm-status'),
+    sendLocalMessage: (messages) => ipcRenderer.invoke('send-local-message', { messages }),
+    onLocalModelProgress: (callback) => ipcRenderer.on('local-model-progress', (event, data) => callback(data)),
     
     // Image/File Selection API
     selectImages: () => ipcRenderer.invoke('select-images'),
@@ -48,14 +72,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hfGetUserInfo: () => ipcRenderer.invoke('hf-get-user-info'),
     onHfDownloadProgress: (callback) => ipcRenderer.on('hf-download-progress', (event, data) => callback(data)),
     
-    // MCP Tools API
-    mcpGetTools: () => ipcRenderer.invoke('mcp-get-tools'),
-    mcpToggleTool: (toolId, enabled) => ipcRenderer.invoke('mcp-toggle-tool', { toolId, enabled }),
-    mcpRefreshTools: () => ipcRenderer.invoke('mcp-refresh-tools'),
-    mcpExecuteTool: (toolId, input) => ipcRenderer.invoke('mcp-execute-tool', { toolId, input }),
-    mcpOpenToolsFolder: () => ipcRenderer.invoke('mcp-open-tools-folder'),
-    sendMcpMessage: (model, messages, enabledToolIds) => ipcRenderer.invoke('send-mcp-message', { model, messages, enabledToolIds }),
-    onMcpToolUse: (callback) => ipcRenderer.on('mcp-tool-use', (event, data) => callback(data)),
     
     // External Links
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
@@ -74,41 +90,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searchHfInferenceModels: (query) => ipcRenderer.invoke('hf-search-inference-models', query),
     sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages }),
     
-    // IDE File System API
-    ideSelectFolder: () => ipcRenderer.invoke('ide-select-folder'),
-    ideGetProjectsFolder: () => ipcRenderer.invoke('ide-get-projects-folder'),
-    ideCreateProject: (projectName) => ipcRenderer.invoke('ide-create-project', projectName),
-    ideListProjects: () => ipcRenderer.invoke('ide-list-projects'),
-    ideReadDirectory: (folderPath) => ipcRenderer.invoke('ide-read-directory', folderPath),
-    ideCreateFile: (filePath, content) => ipcRenderer.invoke('ide-create-file', { filePath, content }),
-    ideCreateFolder: (folderPath) => ipcRenderer.invoke('ide-create-folder', folderPath),
-    ideReadFile: (filePath) => ipcRenderer.invoke('ide-read-file', filePath),
-    ideSaveFile: (filePath, content) => ipcRenderer.invoke('ide-save-file', { filePath, content }),
-    ideDeleteFile: (filePath) => ipcRenderer.invoke('ide-delete-file', filePath),
-    ideRenameFile: (oldPath, newPath) => ipcRenderer.invoke('ide-rename-file', { oldPath, newPath }),
-    ideSearchFiles: (rootPath, query, options) => ipcRenderer.invoke('ide-search-files', { rootPath, query, options }),
-    ideGetStats: (filePath) => ipcRenderer.invoke('ide-get-stats', filePath),
-    ideGitStatus: (rootPath) => ipcRenderer.invoke('ide-git-status', rootPath),
-    
-    // Code Analysis API
-    analyzeCode: (filePath, content) => ipcRenderer.invoke('analyze-code', { filePath, content }),
-    analyzeWorkspace: (rootPath) => ipcRenderer.invoke('analyze-workspace', { rootPath }),
-    
-    // Terminal API
-    terminalCreate: (cwd) => ipcRenderer.invoke('terminal-create', { cwd }),
-    terminalWrite: (terminalId, data) => ipcRenderer.invoke('terminal-write', { terminalId, data }),
-    terminalResize: (terminalId, cols, rows) => ipcRenderer.invoke('terminal-resize', { terminalId, cols, rows }),
-    terminalKill: (terminalId) => ipcRenderer.invoke('terminal-kill', { terminalId }),
-    terminalList: () => ipcRenderer.invoke('terminal-list'),
-    terminalRunCommand: (command, cwd) => ipcRenderer.invoke('terminal-run-command', { command, cwd }),
-    onTerminalOutput: (callback) => {
-        const handler = (event, data) => callback(data);
-        ipcRenderer.on('terminal-output', handler);
-        return () => ipcRenderer.removeListener('terminal-output', handler);
-    },
-    onTerminalExit: (callback) => {
-        const handler = (event, data) => callback(data);
-        ipcRenderer.on('terminal-exit', handler);
-        return () => ipcRenderer.removeListener('terminal-exit', handler);
-    }
 });

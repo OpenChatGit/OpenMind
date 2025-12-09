@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 
 // Colorblind-friendly color palettes
 export const colorblindModes = {
@@ -87,18 +87,18 @@ export const themes = {
     textSecondary: '#888',
     textMuted: '#666',
     // Accents
-    accent: '#6366f1',
-    accentHover: '#818cf8',
+    accent: '#ffffff',
+    accentHover: '#e0e0e0',
     success: '#10b981',
     warning: '#f59e0b',
     error: '#ef4444',
     // Sidebar
-    sidebarBg: '#0f0f19',
+    sidebarBg: '#121214',
     sidebarHover: 'rgba(255, 255, 255, 0.05)',
     // Editor
     editorBg: '#1e1e1e',
     editorLineNumber: '#858585',
-    editorSelection: 'rgba(99, 102, 241, 0.3)',
+    editorSelection: 'rgba(255, 255, 255, 0.2)',
     // Input
     inputBg: '#2d2d2d',
     inputBorder: '#3e3e3e',
@@ -106,8 +106,8 @@ export const themes = {
     scrollbarThumb: 'rgba(255, 255, 255, 0.2)',
     scrollbarTrack: 'transparent',
     // Chat
-    userMessageBg: 'rgba(99, 102, 241, 0.15)',
-    assistantMessageBg: 'rgba(255, 255, 255, 0.05)',
+    userMessageBg: 'rgba(255, 255, 255, 0.08)',
+    assistantMessageBg: 'rgba(255, 255, 255, 0.03)',
     // Code
     codeBg: '#0d0d0d',
     codeText: '#e0e0e0',
@@ -128,8 +128,8 @@ export const themes = {
     textSecondary: '#666666',
     textMuted: '#999999',
     // Accents
-    accent: '#6366f1',
-    accentHover: '#4f46e5',
+    accent: '#1a1a1a',
+    accentHover: '#333333',
     success: '#059669',
     warning: '#d97706',
     error: '#dc2626',
@@ -139,7 +139,7 @@ export const themes = {
     // Editor
     editorBg: '#ffffff',
     editorLineNumber: '#999999',
-    editorSelection: 'rgba(99, 102, 241, 0.2)',
+    editorSelection: 'rgba(0, 0, 0, 0.1)',
     // Input
     inputBg: '#ffffff',
     inputBorder: '#d1d5db',
@@ -147,8 +147,8 @@ export const themes = {
     scrollbarThumb: 'rgba(0, 0, 0, 0.2)',
     scrollbarTrack: 'transparent',
     // Chat
-    userMessageBg: 'rgba(99, 102, 241, 0.1)',
-    assistantMessageBg: 'rgba(0, 0, 0, 0.03)',
+    userMessageBg: 'rgba(0, 0, 0, 0.06)',
+    assistantMessageBg: 'rgba(0, 0, 0, 0.02)',
     // Code
     codeBg: '#f8f8f8',
     codeText: '#1a1a1a',
@@ -165,6 +165,28 @@ export const ThemeProvider = ({ children }) => {
   const [colorblindMode, setColorblindMode] = useState(() => {
     return localStorage.getItem('colorblind-mode') || 'none';
   });
+
+  const [showAnimations, setShowAnimations] = useState(() => {
+    const saved = localStorage.getItem('show-animations');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const [animationType, setAnimationType] = useState(() => {
+    return localStorage.getItem('animation-type') || 'circles';
+  });
+
+  const [retroAudioEnabled, setRetroAudioEnabled] = useState(() => {
+    const saved = localStorage.getItem('retro-audio-enabled');
+    return saved !== null ? saved === 'true' : false;
+  });
+
+  const [retroAudioVolume, setRetroAudioVolume] = useState(() => {
+    const saved = localStorage.getItem('retro-audio-volume');
+    return saved !== null ? parseFloat(saved) : 0.5;
+  });
+
+  // Ripple animation state
+  const [ripple, setRipple] = useState(null);
 
   // Merge theme with colorblind colors
   const theme = useMemo(() => {
@@ -189,32 +211,131 @@ export const ThemeProvider = ({ children }) => {
     // Update CSS variables for global access
     document.documentElement.style.setProperty('--bg', theme.bg);
     document.documentElement.style.setProperty('--bg-secondary', theme.bgSecondary);
+    document.documentElement.style.setProperty('--bg-tertiary', theme.bgTertiary);
+    document.documentElement.style.setProperty('--bg-hover', theme.bgHover);
+    document.documentElement.style.setProperty('--bg-active', theme.bgActive);
     document.documentElement.style.setProperty('--text', theme.text);
+    document.documentElement.style.setProperty('--text-secondary', theme.textSecondary);
+    document.documentElement.style.setProperty('--text-muted', theme.textMuted);
     document.documentElement.style.setProperty('--border', theme.border);
-    // Colorblind colors as CSS variables
+    document.documentElement.style.setProperty('--border-light', theme.borderLight);
+    document.documentElement.style.setProperty('--accent', theme.accent);
+    // Colorblind-aware semantic colors as CSS variables
     document.documentElement.style.setProperty('--error', theme.error);
     document.documentElement.style.setProperty('--success', theme.success);
     document.documentElement.style.setProperty('--warning', theme.warning);
-  }, [themeName, theme]);
+    document.documentElement.style.setProperty('--info', theme.info);
+    document.documentElement.style.setProperty('--error-bg', theme.errorBg);
+    document.documentElement.style.setProperty('--success-bg', theme.successBg);
+    document.documentElement.style.setProperty('--warning-bg', theme.warningBg);
+    // Set data attribute for CSS selectors
+    document.documentElement.setAttribute('data-theme', themeName);
+    document.documentElement.setAttribute('data-colorblind-mode', colorblindMode);
+  }, [themeName, colorblindMode, theme]);
 
   useEffect(() => {
     localStorage.setItem('colorblind-mode', colorblindMode);
   }, [colorblindMode]);
 
-  const toggleTheme = () => {
+  useEffect(() => {
+    localStorage.setItem('show-animations', showAnimations.toString());
+  }, [showAnimations]);
+
+  useEffect(() => {
+    localStorage.setItem('animation-type', animationType);
+  }, [animationType]);
+
+  useEffect(() => {
+    localStorage.setItem('retro-audio-enabled', retroAudioEnabled.toString());
+  }, [retroAudioEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('retro-audio-volume', retroAudioVolume.toString());
+  }, [retroAudioVolume]);
+
+  const toggleTheme = useCallback(() => {
     setThemeName(prev => prev === 'dark' ? 'light' : 'dark');
-  };
+  }, []);
+
+  // Toggle theme with ripple animation from a specific point
+  const toggleThemeWithRipple = useCallback((x, y) => {
+    // Check if View Transitions API is supported
+    if (document.startViewTransition) {
+      // Set the origin for the clip-path animation
+      document.documentElement.style.setProperty('--ripple-x', `${x}px`);
+      document.documentElement.style.setProperty('--ripple-y', `${y}px`);
+      
+      document.startViewTransition(() => {
+        setThemeName(prev => prev === 'dark' ? 'light' : 'dark');
+      });
+    } else {
+      // Fallback: just toggle without animation
+      setThemeName(prev => prev === 'dark' ? 'light' : 'dark');
+    }
+  }, []);
+
+  // Add view transition styles
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.id = 'theme-transition-styles';
+    style.textContent = `
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation: none;
+        mix-blend-mode: normal;
+      }
+      
+      ::view-transition-old(root) {
+        z-index: 1;
+      }
+      
+      ::view-transition-new(root) {
+        z-index: 9999;
+        animation: theme-ripple-reveal 0.5s ease-out;
+      }
+      
+      @keyframes theme-ripple-reveal {
+        from {
+          clip-path: circle(0% at var(--ripple-x, 50%) var(--ripple-y, 50%));
+        }
+        to {
+          clip-path: circle(150% at var(--ripple-x, 50%) var(--ripple-y, 50%));
+        }
+      }
+    `;
+    
+    if (!document.getElementById('theme-transition-styles')) {
+      document.head.appendChild(style);
+    }
+    
+    return () => {
+      const existingStyle = document.getElementById('theme-transition-styles');
+      if (existingStyle) {
+        existingStyle.remove();
+      }
+    };
+  }, []);
 
   const value = useMemo(() => ({
     theme,
     themeName,
     setTheme: setThemeName,
     toggleTheme,
+    toggleThemeWithRipple,
     isDark: themeName === 'dark',
     colorblindMode,
     setColorblindMode,
-    colorblindModes
-  }), [theme, themeName, colorblindMode]);
+    colorblindModes,
+    showAnimations,
+    setShowAnimations,
+    animationType,
+    setAnimationType,
+    retroAudioEnabled,
+    setRetroAudioEnabled,
+    retroAudioVolume,
+    setRetroAudioVolume,
+    ripple
+  }), [theme, themeName, colorblindMode, toggleTheme, toggleThemeWithRipple, showAnimations, animationType, retroAudioEnabled, retroAudioVolume, ripple]);
 
   return (
     <ThemeContext.Provider value={value}>

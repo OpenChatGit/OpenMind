@@ -173,7 +173,7 @@ const MarkdownPreview = ({ content, filename }) => {
           margin: 0 0 12px 0;
         }
         .md-preview a {
-          color: #6366f1;
+          color: #8ab4f8;
           text-decoration: none;
         }
         .md-preview a:hover {
@@ -210,7 +210,7 @@ const MarkdownPreview = ({ content, filename }) => {
           padding-left: 4px;
         }
         .md-preview blockquote {
-          border-left: 3px solid #6366f1;
+          border-left: 3px solid #555;
           padding-left: 16px;
           margin: 12px 0;
           color: #888;

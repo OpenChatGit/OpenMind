@@ -1,7 +1,0 @@
-{
-  "enabled": false,
-  "env": {
-    "SEARXNG_URL": "https://searx.tiekoetter.com"
-  },
-  "note": "This MCP server requires proper MCP protocol support. Use DeepSearch mode instead for web search."
-}

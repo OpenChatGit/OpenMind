@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Wrench, FolderOpen, RefreshCw, Image, Copy, Info, RotateCcw, Check, SlidersHorizontal, Eye, EyeOff } from 'lucide-react';
+import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Image, Copy, Info, RotateCcw, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -16,38 +16,74 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [expandedToolCalls, setExpandedToolCalls] = useState({});
   const [deepSearchEnabled, setDeepSearchEnabled] = useState(false);
   const [isDeepSearching, setIsDeepSearching] = useState(false);
-  const [isMcpProcessing, setIsMcpProcessing] = useState(false);
   const [searchSources, setSearchSources] = useState([]); // URLs from web search
   const [currentSources, setCurrentSources] = useState([]); // Sources for current streaming message
   const [currentPreviews, setCurrentPreviews] = useState([]); // Preview images/cards
-  const [mcpTools, setMcpTools] = useState([]);
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [currentToolCalls, setCurrentToolCalls] = useState([]); // Live tool calls during DeepSearch
   const [attachedImages, setAttachedImages] = useState([]); // Images attached to current message
   const [imageGenEnabled, setImageGenEnabled] = useState(false); // Image generation mode
   const [isGeneratingImage, setIsGeneratingImage] = useState(false); // Currently generating
   const [diffusionModels, setDiffusionModels] = useState([]); // Available diffusion models
   const [selectedImageModel, setSelectedImageModel] = useState(''); // Selected image gen model
-  const [hfModels, setHfModels] = useState([]); // HuggingFace inference models
-  const [hfSearchQuery, setHfSearchQuery] = useState(''); // Search query for HF models
-  const [hfSearchResults, setHfSearchResults] = useState([]); // Search results
-  const [isSearchingHf, setIsSearchingHf] = useState(false); // Loading state
+
   const [hoveredMessageId, setHoveredMessageId] = useState(null); // Track hovered message for action buttons
   const [copiedMessageId, setCopiedMessageId] = useState(null); // Track which message was copied
   const [showInfoDropdown, setShowInfoDropdown] = useState(null); // Track which message info dropdown is open
   const [infoDropdownPosition, setInfoDropdownPosition] = useState('below'); // 'above' or 'below'
-  const [hiddenButtons, setHiddenButtons] = useState(() => {
-    // Load from localStorage
-    const saved = localStorage.getItem('hiddenButtons');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [isButtonsMenuOpen, setIsButtonsMenuOpen] = useState(false); // Dropup menu for hiding buttons
   const [fullscreenImage, setFullscreenImage] = useState(null); // Fullscreen image modal
+
+  // Typewriter effect state
+  const [typewriterText, setTypewriterText] = useState('');
+  const [typewriterIndex, setTypewriterIndex] = useState(0);
   
-  // Save hidden buttons to localStorage when changed
+  const isNewChat = !activeChatId || messages.length === 0;
+
+  // Typewriter effect - only runs when new chat is active
   useEffect(() => {
-    localStorage.setItem('hiddenButtons', JSON.stringify(hiddenButtons));
-  }, [hiddenButtons]);
+    if (!isNewChat) return; // Don't run when chat is active
+    
+    const phrases = [
+      'What can I help you with?',
+      'Ask me anything...',
+      'Need help with code?',
+      'Let\'s brainstorm ideas...',
+      'Ask about the weather...',
+      'Explain a concept...',
+      'Write something creative...'
+    ];
+    
+    const phrase = phrases[typewriterIndex % phrases.length];
+    let charIndex = 0;
+    let isDeleting = false;
+    let timeout;
+
+    const type = () => {
+      if (!isDeleting) {
+        setTypewriterText(phrase.substring(0, charIndex + 1));
+        charIndex++;
+        if (charIndex === phrase.length) {
+          timeout = setTimeout(() => {
+            isDeleting = true;
+            type();
+          }, 2000);
+          return;
+        }
+        timeout = setTimeout(type, 80);
+      } else {
+        setTypewriterText(phrase.substring(0, charIndex));
+        charIndex--;
+        if (charIndex === 0) {
+          isDeleting = false;
+          setTypewriterIndex((prev) => (prev + 1) % phrases.length);
+          return;
+        }
+        timeout = setTimeout(type, 40);
+      }
+    };
+
+    type();
+    return () => clearTimeout(timeout);
+  }, [typewriterIndex, isNewChat]);
 
   // ESC key to close fullscreen image
   useEffect(() => {
@@ -60,34 +96,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [fullscreenImage]);
 
-  const toggleButtonVisibility = (buttonId) => {
-    setHiddenButtons(prev => 
-      prev.includes(buttonId) 
-        ? prev.filter(id => id !== buttonId)
-        : [...prev, buttonId]
-    );
-  };
+
   
-  // Get current inference provider
-  const inferenceProvider = inferenceSettings?.inferenceProvider || 'local';
   
-  // Search HF models with debounce
-  const searchHfModels = useCallback(async (query) => {
-    if (!query.trim()) {
-      setHfSearchResults([]);
-      return;
-    }
-    setIsSearchingHf(true);
-    try {
-      const result = await window.electronAPI?.searchHfInferenceModels(query);
-      if (result?.success) {
-        setHfSearchResults(result.models);
-      }
-    } catch (e) {
-      console.error('HF search error:', e);
-    }
-    setIsSearchingHf(false);
-  }, []);
+
 
   const fetchModels = useCallback(async () => {
     // Fetch Ollama models
@@ -108,45 +120,11 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       }
     }
     
-    // Fetch HuggingFace inference models
-    if (window.electronAPI?.getHfInferenceModels) {
-      const result = await window.electronAPI.getHfInferenceModels();
-      if (result?.success && result.models) {
-        setHfModels(result.models);
-      }
-    }
   }, []); // No dependencies - only runs on mount and when explicitly called
 
-  // Handle provider change - select appropriate default model
-  // Only auto-select when switching providers, not when user manually selects a model
-  const [lastProvider, setLastProvider] = useState(inferenceProvider);
-  
-  useEffect(() => {
-    // Only auto-select default model when provider actually changes
-    if (inferenceProvider !== lastProvider) {
-      setLastProvider(inferenceProvider);
-      
-      if (inferenceProvider === 'huggingface' && hfModels.length > 0) {
-        // Switching to HuggingFace - select first HF model
-        setSelectedModel(hfModels[0].id);
-      } else if (inferenceProvider === 'local' && availableModels.length > 0) {
-        // Switching to Local - select first Ollama model
-        setSelectedModel(availableModels[0]);
-      }
-    } else {
-      // Validate current model matches provider (in case of mismatch)
-      const isHfModel = selectedModel?.includes('/');
-      if (inferenceProvider === 'huggingface' && !isHfModel && hfModels.length > 0) {
-        setSelectedModel(hfModels[0].id);
-      } else if (inferenceProvider === 'local' && isHfModel && availableModels.length > 0) {
-        setSelectedModel(availableModels[0]);
-      }
-    }
-  }, [inferenceProvider, hfModels, availableModels, lastProvider, selectedModel]);
 
   useEffect(() => {
     fetchModels();
-    fetchMcpTools();
     
     // Fetch diffusion models
     const loadDiffusionModels = async () => {
@@ -223,33 +201,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       });
     }
   }, [fetchModels]);
-
-  const fetchMcpTools = async () => {
-    if (window.electronAPI?.mcpGetTools) {
-      const tools = await window.electronAPI.mcpGetTools();
-      setMcpTools(tools || []);
-    }
-  };
-
-  const handleToggleTool = async (toolId, enabled) => {
-    if (window.electronAPI?.mcpToggleTool) {
-      await window.electronAPI.mcpToggleTool(toolId, enabled);
-      fetchMcpTools();
-    }
-  };
-
-  const handleOpenToolsFolder = async () => {
-    if (window.electronAPI?.mcpOpenToolsFolder) {
-      await window.electronAPI.mcpOpenToolsFolder();
-    }
-  };
-
-  const handleRefreshTools = async () => {
-    if (window.electronAPI?.mcpRefreshTools) {
-      await window.electronAPI.mcpRefreshTools();
-      fetchMcpTools();
-    }
-  };
 
   const handleAttachImages = async () => {
     if (window.electronAPI?.selectImages) {
@@ -457,8 +408,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
     try {
       let response;
-      const enabledMcpTools = mcpTools.filter(t => t.enabled);
-      
       if (deepSearchEnabled) {
         // DeepSearch mode with tool use (includes web search, file search, etc.)
         setIsDeepSearching(true);
@@ -470,15 +419,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         setExpandedReasoning(prev => ({ ...prev, [assistantMessageId]: true })); // Auto-expand reasoning during DeepSearch
         response = await window.electronAPI.sendDeepSearchMessage(selectedModel, newMessages);
         setIsDeepSearching(false);
-      } else if (enabledMcpTools.length > 0) {
-        // MCP Tools mode (only MCP tools, no DeepSearch)
-        setIsMcpProcessing(true);
-        const enabledToolIds = enabledMcpTools.map(t => t.id);
-        response = await window.electronAPI.sendMcpMessage(selectedModel, newMessages, enabledToolIds);
-        setIsMcpProcessing(false);
-      } else if (inferenceProvider === 'huggingface') {
-        // HuggingFace Inference API
-        response = await window.electronAPI.sendHfMessage(selectedModel, newMessages);
       } else {
         // Normal streaming mode (Local Ollama)
         response = await window.electronAPI.sendOllamaMessage(selectedModel, newMessages);
@@ -506,21 +446,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     } catch (error) {
       console.error('Inference error:', error);
       setIsDeepSearching(false);
-      setIsMcpProcessing(false);
       
       // Build helpful error message
-      let errorMsg;
-      if (inferenceProvider === 'huggingface') {
-        if (error?.message?.includes('not supported')) {
-          errorMsg = `Error: Model "${selectedModel}" is not available for inference. Try a different model.`;
-        } else if (error?.message?.includes('API token')) {
-          errorMsg = 'Error: HuggingFace API key not set. Check Settings.';
-        } else {
-          errorMsg = `Error: ${error?.message || 'Could not connect to HuggingFace.'}`;
-        }
-      } else {
-        errorMsg = 'Error: Could not connect to Ollama. Is it running?';
-      }
+      const errorMsg = 'Error: Could not connect to Ollama. Is it running?';
       
       onUpdateMessages(chatId, [...newMessages, {
         role: 'assistant',
@@ -530,7 +458,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         isStreaming: false
       }]);
     }
-  }, [input, selectedModel, activeChatId, messages, onUpdateMessages, onFirstMessage, mcpTools, deepSearchEnabled, attachedImages, inferenceProvider]);
+  }, [input, selectedModel, activeChatId, messages, onUpdateMessages, onFirstMessage, deepSearchEnabled, attachedImages]);
 
   // Copy message content to clipboard
   const handleCopyMessage = useCallback(async (messageContent) => {
@@ -546,17 +474,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   // Regenerate AI response for a specific message
   const handleRegenerate = useCallback(async (messageIndex) => {
     if (!selectedModel || selectedModel === 'No Models Found') return;
-    
-    // Validate model matches provider
-    const isHfModel = selectedModel.includes('/'); // HF models have format "org/model"
-    if (inferenceProvider === 'huggingface' && !isHfModel) {
-      console.error('Cannot regenerate: Selected model is not a HuggingFace model');
-      return;
-    }
-    if (inferenceProvider === 'local' && isHfModel) {
-      console.error('Cannot regenerate: Selected model is not an Ollama model');
-      return;
-    }
     
     // Find the user message before this AI message
     const aiMessage = messages[messageIndex];
@@ -613,8 +530,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
     try {
       let response;
-      const enabledMcpTools = mcpTools.filter(t => t.enabled);
-      
       // Use the correct API based on provider
       if (deepSearchEnabled) {
         setIsDeepSearching(true);
@@ -624,13 +539,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         setCurrentToolCalls([]);
         response = await window.electronAPI.sendDeepSearchMessage(selectedModel, newMessages);
         setIsDeepSearching(false);
-      } else if (enabledMcpTools.length > 0) {
-        setIsMcpProcessing(true);
-        const enabledToolIds = enabledMcpTools.map(t => t.id);
-        response = await window.electronAPI.sendMcpMessage(selectedModel, newMessages, enabledToolIds);
-        setIsMcpProcessing(false);
-      } else if (inferenceProvider === 'huggingface') {
-        response = await window.electronAPI.sendHfMessage(selectedModel, newMessages);
       } else {
         response = await window.electronAPI.sendOllamaMessage(selectedModel, newMessages);
       }
@@ -653,19 +561,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     } catch (error) {
       console.error('Regenerate error:', error);
       setIsDeepSearching(false);
-      setIsMcpProcessing(false);
       
       // Build helpful error message
-      let errorMsg = 'Error: Could not regenerate response.';
-      if (error?.message) {
-        if (error.message.includes('not supported')) {
-          errorMsg = `Error: Model "${selectedModel}" is not available for inference. Try a different model.`;
-        } else if (error.message.includes('API token')) {
-          errorMsg = 'Error: HuggingFace API key not set. Check Settings.';
-        } else {
-          errorMsg = `Error: ${error.message}`;
-        }
-      }
+      const errorMsg = error?.message ? `Error: ${error.message}` : 'Error: Could not regenerate response.';
       
       onUpdateMessages(activeChatId, [...newMessages, {
         role: 'assistant',
@@ -675,29 +573,23 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         isStreaming: false
       }]);
     }
-  }, [selectedModel, activeChatId, messages, onUpdateMessages, mcpTools, deepSearchEnabled, inferenceProvider, currentSources, currentToolCalls, currentPreviews]);
-
-  const isNewChat = !activeChatId || messages.length === 0;
+  }, [selectedModel, activeChatId, messages, onUpdateMessages, deepSearchEnabled, currentSources, currentToolCalls, currentPreviews]);
 
   const inputBox = (
     <div style={{
-      padding: isNewChat ? '0' : '1.5rem',
-      paddingBottom: isNewChat ? '0' : '2rem',
-      maxWidth: '800px',
-      margin: '0 auto',
-      width: '100%'
+      width: '100%',
+      background: theme.bgSecondary,
+      borderRadius: '20px',
+      padding: '16px',
+      boxShadow: isNewChat 
+        ? (isDark ? '0 0 20px rgba(255, 255, 255, 0.04)' : '0 0 20px rgba(0,0,0,0.06)')
+        : 'none',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px',
+      border: isNewChat ? `1px solid ${theme.border}` : 'none',
+      transition: 'box-shadow 0.4s ease, border 0.4s ease'
     }}>
-      <div style={{
-        width: '100%',
-        background: theme.bgSecondary,
-        borderRadius: '20px',
-        padding: '16px',
-        boxShadow: isDark ? '0 0 20px rgba(255, 255, 255, 0.05), 0 4px 6px rgba(0,0,0,0.1)' : '0 4px 12px rgba(0,0,0,0.08)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-        border: `1px solid ${theme.border}`
-      }}>
         {/* Attached Images Preview */}
         {attachedImages.length > 0 && (
           <div style={{
@@ -779,14 +671,13 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             {/* Attach Button - expands on hover */}
-            {!hiddenButtons.includes('attach') && (
             <button 
               className="expandable-btn"
               onClick={handleAttachImages}
               style={{
-                background: attachedImages.length > 0 ? '#fff' : 'transparent',
-                border: '1px solid rgba(255,255,255,0.3)',
-                color: attachedImages.length > 0 ? '#000' : '#888',
+                background: attachedImages.length > 0 ? (isDark ? '#fff' : '#1a1a1a') : 'transparent',
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                color: attachedImages.length > 0 ? (isDark ? '#000' : '#fff') : theme.textSecondary,
                 cursor: 'pointer',
                 padding: '6px 10px',
                 display: 'flex',
@@ -828,10 +719,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 {attachedImages.length > 0 ? `${attachedImages.length} Image${attachedImages.length > 1 ? 's' : ''}` : 'Attach'}
               </span>
             </button>
-            )}
 
             {/* DeepSearch Button - expands on hover, rotating glow when active */}
-            {!hiddenButtons.includes('deepsearch') && (
             <div style={{ 
               position: 'relative',
               borderRadius: '20px',
@@ -860,9 +749,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                   setDeepSearchEnabled(newValue);
                 }}
                 style={{
-                  background: deepSearchEnabled ? '#fff' : '#2c2c2e',
-                  border: isDeepSearching ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  color: deepSearchEnabled ? '#000' : '#888',
+                  background: deepSearchEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isDark ? '#2c2c2e' : '#f3f4f6'),
+                  border: isDeepSearching ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                  color: deepSearchEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
                   cursor: 'pointer',
                   padding: '6px 10px',
                   display: 'flex',
@@ -886,8 +775,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 }}
                 onMouseLeave={(e) => {
                   if (!deepSearchEnabled) {
-                    e.currentTarget.style.background = isDeepSearching ? '#2c2c2e' : 'transparent';
-                    e.currentTarget.style.color = '#888';
+                    e.currentTarget.style.background = isDeepSearching ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent';
+                    e.currentTarget.style.color = theme.textSecondary;
                   }
                   e.currentTarget.style.gap = '0px';
                   e.currentTarget.querySelector('.btn-label').style.width = '0';
@@ -904,10 +793,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               </button>
             </div>
 
-            )}
-
             {/* Image Generation Button */}
-            {!hiddenButtons.includes('imagegen') && (
             <div style={{ 
               position: 'relative',
               borderRadius: '20px',
@@ -920,9 +806,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               <button
                 onClick={() => setImageGenEnabled(!imageGenEnabled)}
                 style={{
-                  background: imageGenEnabled ? '#fff' : (isGeneratingImage ? '#2c2c2e' : 'transparent'),
-                  border: isGeneratingImage ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  color: imageGenEnabled ? '#000' : '#888',
+                  background: imageGenEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isGeneratingImage ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent'),
+                  border: isGeneratingImage ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                  color: imageGenEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
                   cursor: 'pointer',
                   padding: '6px 10px',
                   display: 'flex',
@@ -946,8 +832,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                 }}
                 onMouseLeave={(e) => {
                   if (!imageGenEnabled) {
-                    e.currentTarget.style.background = isGeneratingImage ? '#2c2c2e' : 'transparent';
-                    e.currentTarget.style.color = '#888';
+                    e.currentTarget.style.background = isGeneratingImage ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent';
+                    e.currentTarget.style.color = theme.textSecondary;
                   }
                   e.currentTarget.style.gap = '0px';
                   e.currentTarget.querySelector('.btn-label').style.width = '0';
@@ -962,338 +848,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                   transition: 'all 0.3s ease' 
                 }}>Generate</span>
               </button>
-            </div>
-            )}
-
-            {/* MCP Tools Button - expands on hover, rotating glow when processing */}
-            {!hiddenButtons.includes('mcptools') && (
-            <div style={{ 
-              position: 'relative',
-              borderRadius: '20px',
-              padding: isMcpProcessing ? '2px' : '0',
-              background: isMcpProcessing 
-                ? 'conic-gradient(from var(--angle, 0deg), #ff6b6b, #feca57, #48dbfb, #ff9ff3, #ff6b6b)' 
-                : 'transparent',
-              animation: isMcpProcessing ? 'rotate-glow 2s linear infinite' : 'none'
-            }}>
-              <button
-                onClick={() => setIsToolsMenuOpen(!isToolsMenuOpen)}
-                style={{
-                  background: mcpTools.some(t => t.enabled) ? '#fff' : (isMcpProcessing ? '#2c2c2e' : 'transparent'),
-                  border: isMcpProcessing ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  color: mcpTools.some(t => t.enabled) ? '#000' : '#888',
-                  cursor: 'pointer',
-                  padding: '6px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0px',
-                  borderRadius: '18px',
-                  fontSize: '0.85rem',
-                  fontWeight: '500',
-                  transition: 'all 0.3s ease',
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => {
-                  if (!mcpTools.some(t => t.enabled)) {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                    e.currentTarget.style.color = '#ccc';
-                  }
-                  e.currentTarget.style.gap = '6px';
-                  e.currentTarget.querySelector('.btn-label').style.width = 'auto';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  if (!mcpTools.some(t => t.enabled)) {
-                    e.currentTarget.style.background = isMcpProcessing ? '#2c2c2e' : 'transparent';
-                    e.currentTarget.style.color = '#888';
-                  }
-                  e.currentTarget.style.gap = '0px';
-                  e.currentTarget.querySelector('.btn-label').style.width = '0';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
-                }}
-              >
-                <Wrench size={16} />
-                <span className="btn-label" style={{ 
-                  width: '0', 
-                  opacity: '0', 
-                  overflow: 'hidden', 
-                  transition: 'all 0.3s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}>
-                  Tools
-                  {mcpTools.filter(t => t.enabled).length > 0 && (
-                    <span style={{ fontSize: '0.75rem' }}>({mcpTools.filter(t => t.enabled).length})</span>
-                  )}
-                </span>
-              </button>
-
-              {isToolsMenuOpen && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-                    onClick={() => setIsToolsMenuOpen(false)}
-                  />
-                  <div style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    left: 0,
-                    marginBottom: '8px',
-                    background: '#1f1f1f',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '12px',
-                    padding: '8px',
-                    minWidth: '220px',
-                    maxHeight: '300px',
-                    overflowY: 'auto',
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-                    zIndex: 100,
-                    backdropFilter: 'blur(10px)'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '8px',
-                      paddingBottom: '8px',
-                      borderBottom: '1px solid rgba(255,255,255,0.1)'
-                    }}>
-                      <span style={{ fontSize: '0.8rem', color: '#888', fontWeight: '500' }}>MCP Tools</span>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button
-                          onClick={handleRefreshTools}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#888',
-                            cursor: 'pointer',
-                            padding: '4px',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-                          onMouseLeave={(e) => e.currentTarget.style.color = '#888'}
-                          title="Refresh tools"
-                        >
-                          <RefreshCw size={14} />
-                        </button>
-                        <button
-                          onClick={handleOpenToolsFolder}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#888',
-                            cursor: 'pointer',
-                            padding: '4px',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-                          onMouseLeave={(e) => e.currentTarget.style.color = '#888'}
-                          title="Open tools folder"
-                        >
-                          <FolderOpen size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {mcpTools.length > 0 ? (
-                      mcpTools.map(tool => (
-                        <div
-                          key={tool.id}
-                          onClick={() => handleToggleTool(tool.id, !tool.enabled)}
-                          style={{
-                            padding: '8px 10px',
-                            cursor: 'pointer',
-                            borderRadius: '8px',
-                            fontSize: '0.85rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            transition: 'background 0.2s',
-                            marginBottom: '2px'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                        >
-                          <div style={{
-                            width: '18px',
-                            height: '18px',
-                            borderRadius: '4px',
-                            border: tool.enabled ? 'none' : '1px solid #555',
-                            background: tool.enabled ? '#4caf50' : 'transparent',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0
-                          }}>
-                            {tool.enabled && (
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            )}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ color: '#ececec', fontWeight: '500' }}>{tool.name}</div>
-                            {tool.description && (
-                              <div style={{
-                                color: '#888',
-                                fontSize: '0.75rem',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis'
-                              }}>
-                                {tool.description}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: '12px', color: '#888', fontSize: '0.85rem', textAlign: 'center' }}>
-                        No tools installed.<br />
-                        <span
-                          onClick={handleOpenToolsFolder}
-                          style={{ color: '#6ea8fe', cursor: 'pointer', textDecoration: 'underline' }}
-                        >
-                          Open tools folder
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            )}
-
-            {/* Button Visibility Settings */}
-            <div style={{ position: 'relative' }}>
-              <button
-                onClick={() => setIsButtonsMenuOpen(!isButtonsMenuOpen)}
-                style={{
-                  background: hiddenButtons.length > 0 ? 'rgba(255,165,0,0.2)' : 'transparent',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: hiddenButtons.length > 0 ? '#ffa500' : '#888',
-                  cursor: 'pointer',
-                  padding: '6px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0px',
-                  borderRadius: '20px',
-                  fontSize: '0.85rem',
-                  fontWeight: '500',
-                  transition: 'all 0.3s ease',
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                  e.currentTarget.style.color = '#fff';
-                  e.currentTarget.style.gap = '6px';
-                  e.currentTarget.querySelector('.btn-label').style.width = 'auto';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = hiddenButtons.length > 0 ? 'rgba(255,165,0,0.2)' : 'transparent';
-                  e.currentTarget.style.color = hiddenButtons.length > 0 ? '#ffa500' : '#888';
-                  e.currentTarget.style.gap = '0px';
-                  e.currentTarget.querySelector('.btn-label').style.width = '0';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
-                }}
-              >
-                <SlidersHorizontal size={16} />
-                <span className="btn-label" style={{ 
-                  width: '0', 
-                  opacity: '0', 
-                  overflow: 'hidden', 
-                  transition: 'all 0.3s ease' 
-                }}>Buttons</span>
-              </button>
-
-              {isButtonsMenuOpen && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-                    onClick={() => setIsButtonsMenuOpen(false)}
-                  />
-                  <div style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    left: 0,
-                    marginBottom: '8px',
-                    background: '#1f1f1f',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '12px',
-                    padding: '8px',
-                    minWidth: '180px',
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-                    zIndex: 100,
-                    backdropFilter: 'blur(10px)'
-                  }}>
-                    <div style={{
-                      fontSize: '0.8rem',
-                      color: '#888',
-                      fontWeight: '500',
-                      marginBottom: '8px',
-                      paddingBottom: '8px',
-                      borderBottom: '1px solid rgba(255,255,255,0.1)'
-                    }}>
-                      Show/Hide Buttons
-                    </div>
-                    
-                    {[
-                      { id: 'attach', label: 'Attach', icon: <Paperclip size={14} /> },
-                      { id: 'deepsearch', label: 'DeepSearch', icon: <Radar size={14} /> },
-                      { id: 'imagegen', label: 'Image Gen', icon: <Image size={14} /> },
-                      { id: 'mcptools', label: 'MCP Tools', icon: <Wrench size={14} /> }
-                    ].map(btn => (
-                      <div
-                        key={btn.id}
-                        onClick={() => toggleButtonVisibility(btn.id)}
-                        style={{
-                          padding: '8px 10px',
-                          cursor: 'pointer',
-                          borderRadius: '8px',
-                          fontSize: '0.85rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          transition: 'background 0.2s',
-                          marginBottom: '2px'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        <div style={{
-                          width: '18px',
-                          height: '18px',
-                          borderRadius: '4px',
-                          border: hiddenButtons.includes(btn.id) ? '1px solid #555' : 'none',
-                          background: hiddenButtons.includes(btn.id) ? 'transparent' : '#4caf50',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0
-                        }}>
-                          {!hiddenButtons.includes(btn.id) && (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ececec' }}>
-                          {btn.icon}
-                          {btn.label}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
           </div>
 
@@ -1338,23 +892,20 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                     bottom: '100%',
                     right: 0,
                     marginBottom: '8px',
-                    background: '#1f1f1f',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: theme.bgSecondary,
+                    border: `1px solid ${theme.border}`,
                     borderRadius: '12px',
                     padding: '4px',
                     minWidth: '200px',
                     maxHeight: '300px',
                     overflowY: 'auto',
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+                    boxShadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 10px 25px rgba(0,0,0,0.15)',
                     zIndex: 100,
                     backdropFilter: 'blur(10px)'
                   }}>
                     {imageGenEnabled ? (
                       // Image Generation Models
                       <>
-                        <div style={{ padding: '6px 12px', fontSize: '0.75rem', color: '#888', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '4px' }}>
-                          🎨 Image Generation Models
-                        </div>
                         {diffusionModels.length > 0 ? (
                           diffusionModels.map(model => (
                             <div
@@ -1368,8 +919,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                 cursor: 'pointer',
                                 borderRadius: '8px',
                                 fontSize: '0.85rem',
-                                color: selectedImageModel === model.name ? 'white' : '#aaa',
-                                background: selectedImageModel === model.name ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                color: selectedImageModel === model.name ? theme.text : theme.textSecondary,
+                                background: selectedImageModel === model.name ? theme.bgActive : 'transparent',
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: '2px',
@@ -1377,164 +928,36 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               }}
                               onMouseEnter={(e) => {
                                 if (selectedImageModel !== model.name) {
-                                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                                  e.currentTarget.style.color = '#ddd';
+                                  e.currentTarget.style.background = theme.bgHover;
+                                  e.currentTarget.style.color = theme.text;
                                 }
                               }}
                               onMouseLeave={(e) => {
                                 if (selectedImageModel !== model.name) {
                                   e.currentTarget.style.background = 'transparent';
-                                  e.currentTarget.style.color = '#aaa';
+                                  e.currentTarget.style.color = theme.textSecondary;
                                 }
                               }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <span>{model.name}</span>
-                                {selectedImageModel === model.name && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />}
+                                {selectedImageModel === model.name && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: theme.text }} />}
                               </div>
                               {model.sizeFormatted && (
-                                <span style={{ fontSize: '0.7rem', color: '#666' }}>{model.sizeFormatted} • {model.type}</span>
+                                <span style={{ fontSize: '0.7rem', color: theme.textMuted }}>{model.sizeFormatted} • {model.type}</span>
                               )}
                             </div>
                           ))
                         ) : (
-                          <div style={{ padding: '12px', color: '#888', fontSize: '0.85rem', textAlign: 'center' }}>
+                          <div style={{ padding: '12px', color: theme.textSecondary, fontSize: '0.85rem', textAlign: 'center' }}>
                             No models in /models folder.<br />
-                            <span style={{ fontSize: '0.75rem', color: '#666' }}>Will use SDXL-Turbo from HuggingFace</span>
+                            <span style={{ fontSize: '0.75rem', color: theme.textMuted }}>Will use SDXL-Turbo from HuggingFace</span>
                           </div>
-                        )}
-                      </>
-                    ) : inferenceProvider === 'huggingface' ? (
-                      // HuggingFace Inference Models with Search
-                      <>
-                        <div style={{ padding: '6px 12px', fontSize: '0.75rem', color: '#FFD21E', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                          🤗 HuggingFace Inference
-                        </div>
-                        {/* Search Bar */}
-                        <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                          <input
-                            type="text"
-                            value={hfSearchQuery}
-                            onChange={(e) => {
-                              setHfSearchQuery(e.target.value);
-                              searchHfModels(e.target.value);
-                            }}
-                            placeholder="Search models..."
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              width: '100%',
-                              padding: '6px 10px',
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '6px',
-                              color: '#fff',
-                              fontSize: '0.85rem',
-                              outline: 'none'
-                            }}
-                          />
-                        </div>
-                        {/* Search Results or Default Models */}
-                        {isSearchingHf ? (
-                          <div style={{ padding: '12px', color: '#888', fontSize: '0.85rem', textAlign: 'center' }}>
-                            Searching...
-                          </div>
-                        ) : (hfSearchQuery && hfSearchResults.length > 0) ? (
-                          // Show search results
-                          hfSearchResults.map(model => (
-                            <div
-                              key={model.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                console.log('Selected HF model:', model.id);
-                                setSelectedModel(model.id);
-                                setIsModelMenuOpen(false);
-                                setHfSearchQuery('');
-                                setHfSearchResults([]);
-                              }}
-                              style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                borderRadius: '8px',
-                                fontSize: '0.85rem',
-                                color: selectedModel === model.id ? 'white' : '#aaa',
-                                background: selectedModel === model.id ? 'rgba(255,210,30,0.15)' : 'transparent',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '2px',
-                                transition: 'background 0.2s'
-                              }}
-                              onMouseEnter={(e) => {
-                                if (selectedModel !== model.id) {
-                                  e.currentTarget.style.background = 'rgba(255,210,30,0.08)';
-                                  e.currentTarget.style.color = '#ececec';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (selectedModel !== model.id) {
-                                  e.currentTarget.style.background = 'transparent';
-                                  e.currentTarget.style.color = '#aaa';
-                                }
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span style={{ fontSize: '0.8rem' }}>{model.id}</span>
-                              </div>
-                              <span style={{ fontSize: '0.7rem', color: '#666' }}>{model.size} • {model.downloads?.toLocaleString()} downloads</span>
-                            </div>
-                          ))
-                        ) : hfSearchQuery && hfSearchResults.length === 0 ? (
-                          <div style={{ padding: '12px', color: '#888', fontSize: '0.85rem', textAlign: 'center' }}>
-                            No models found
-                          </div>
-                        ) : (
-                          // Show default models
-                          hfModels.map(model => (
-                            <div
-                              key={model.id}
-                              onClick={() => {
-                                setSelectedModel(model.id);
-                                setIsModelMenuOpen(false);
-                              }}
-                              style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                borderRadius: '8px',
-                                fontSize: '0.85rem',
-                                color: selectedModel === model.id ? 'white' : '#aaa',
-                                background: selectedModel === model.id ? 'rgba(255,210,30,0.15)' : 'transparent',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '2px',
-                                transition: 'background 0.2s'
-                              }}
-                              onMouseEnter={(e) => {
-                                if (selectedModel !== model.id) {
-                                  e.currentTarget.style.background = 'rgba(255,210,30,0.08)';
-                                  e.currentTarget.style.color = '#ececec';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (selectedModel !== model.id) {
-                                  e.currentTarget.style.background = 'transparent';
-                                  e.currentTarget.style.color = '#aaa';
-                                }
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span>{model.name}</span>
-                                {selectedModel === model.id && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#FFD21E' }} />}
-                              </div>
-                              <span style={{ fontSize: '0.7rem', color: '#666' }}>{model.size}</span>
-                            </div>
-                          ))
                         )}
                       </>
                     ) : (
                       // Ollama Models (Local)
                       <>
-                        <div style={{ padding: '6px 12px', fontSize: '0.75rem', color: '#888', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '4px' }}>
-                          💻 Local (Ollama)
-                        </div>
                         {availableModels.length > 0 ? (
                           availableModels.map(model => (
                             <div
@@ -1548,8 +971,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                 cursor: 'pointer',
                                 borderRadius: '8px',
                                 fontSize: '0.9rem',
-                                color: selectedModel === model ? 'white' : '#aaa',
-                                background: selectedModel === model ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                color: selectedModel === model ? theme.text : theme.textSecondary,
+                                background: selectedModel === model ? theme.bgActive : 'transparent',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
@@ -1557,23 +980,23 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               }}
                               onMouseEnter={(e) => {
                                 if (selectedModel !== model) {
-                                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                  e.currentTarget.style.color = '#ececec';
+                                  e.currentTarget.style.background = theme.bgHover;
+                                  e.currentTarget.style.color = theme.text;
                                 }
                               }}
                               onMouseLeave={(e) => {
                                 if (selectedModel !== model) {
                                   e.currentTarget.style.background = 'transparent';
-                                  e.currentTarget.style.color = '#aaa';
+                                  e.currentTarget.style.color = theme.textSecondary;
                                 }
                               }}
                             >
                               {model}
-                              {selectedModel === model && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />}
+                              {selectedModel === model && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: theme.text }} />}
                             </div>
                           ))
                         ) : (
-                          <div style={{ padding: '8px 12px', color: '#888', fontSize: '0.9rem' }}>
+                          <div style={{ padding: '8px 12px', color: theme.textSecondary, fontSize: '0.9rem' }}>
                             No models found. <br /> Is Ollama running?
                           </div>
                         )}
@@ -1587,8 +1010,12 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             <button
               onClick={handleSend}
               style={{
-                background: (input.trim() || attachedImages.length > 0) ? 'white' : '#4a4a4a',
-                color: (input.trim() || attachedImages.length > 0) ? 'black' : '#888',
+                background: (input.trim() || attachedImages.length > 0) 
+                  ? (isDark ? 'white' : '#1a1a1a') 
+                  : (isDark ? '#4a4a4a' : '#d1d5db'),
+                color: (input.trim() || attachedImages.length > 0) 
+                  ? (isDark ? 'black' : 'white') 
+                  : '#888',
                 border: 'none',
                 borderRadius: '50%',
                 width: '32px',
@@ -1604,7 +1031,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             </button>
           </div>
         </div>
-      </div>
     </div>
   );
 
@@ -1618,43 +1044,72 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       zIndex: 10,
       overflow: 'hidden'
     }}>
-      {isNewChat ? (
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '2rem',
-          gap: '0.5rem',
-          maxWidth: '800px',
-          margin: '0 auto',
-          width: '100%'
-        }}>
-          <h1 style={{
-            fontSize: '2rem',
-            fontWeight: '600',
-            color: theme.text,
-            textAlign: 'center',
-            opacity: 0.9
+      {/* Messages area - always present but empty when new chat */}
+      <div style={{ 
+        flex: 1, 
+        overflowY: 'auto', 
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        {isNewChat ? (
+          /* Centered welcome content with input */
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '2rem',
+            gap: '1rem',
+            maxWidth: '800px',
+            margin: '0 auto',
+            width: '100%',
+            position: 'relative',
+            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            What can I help you with?
-          </h1>
-          {inputBox}
-        </div>
-      ) : (
-        <>
-          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-            <div style={{
-              padding: '2rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1.5rem',
-              maxWidth: '800px',
-              margin: '0 auto',
-              width: '100%'
+            <h1 style={{
+              fontSize: '2rem',
+              fontWeight: '600',
+              color: theme.text,
+              textAlign: 'center',
+              opacity: 0.9,
+              position: 'relative',
+              zIndex: 1,
+              minHeight: '2.5rem',
+              transition: 'opacity 0.3s ease'
             }}>
-              {messages.map((msg, i) => (
+              {typewriterText}
+              <span style={{
+                borderRight: `2px solid ${theme.text}`,
+                marginLeft: '2px',
+                animation: 'blink 1s step-end infinite'
+              }} />
+              <style>
+                {`
+                  @keyframes blink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0; }
+                  }
+                `}
+              </style>
+            </h1>
+            <div style={{ width: '100%' }}>
+              {inputBox}
+            </div>
+          </div>
+        ) : (
+          /* Chat messages */
+          <div style={{
+            padding: '2rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            maxWidth: '800px',
+            margin: '0 auto',
+            width: '100%'
+          }}>
+            {messages.map((msg, i) => (
                 <div key={msg.id || i} style={{
                   display: 'flex',
                   justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
@@ -1666,7 +1121,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                       padding: '1rem 1.5rem',
                       borderRadius: '20px',
                       background: theme.userMessageBg,
-                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
+                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0, 0, 0, 0.1)'}`,
                       lineHeight: '1.5',
                       color: theme.text
                     }}>
@@ -1731,7 +1186,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               fontSize: '0.9rem',
                               fontWeight: '500',
                               marginBottom: '0.5rem',
-                              backgroundImage: 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)',
+                              backgroundImage: isDark 
+                                ? 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)'
+                                : 'linear-gradient(90deg, #999 0%, #555 50%, #999 100%)',
                               backgroundSize: '200% 100%',
                               backgroundClip: 'text',
                               WebkitBackgroundClip: 'text',
@@ -1745,20 +1202,20 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               fontSize: '0.9rem',
                               fontWeight: '500',
                               marginBottom: '0.5rem',
-                              color: '#888',
+                              color: theme.textSecondary,
                               transition: 'color 0.2s'
                             }}
                             onMouseEnter={(e) => {
-                              if (!msg.isStreaming) e.currentTarget.style.color = '#bbb';
+                              if (!msg.isStreaming) e.currentTarget.style.color = theme.text;
                             }}
                             onMouseLeave={(e) => {
-                              if (!msg.isStreaming) e.currentTarget.style.color = '#888';
+                              if (!msg.isStreaming) e.currentTarget.style.color = theme.textSecondary;
                             }}
                           >
                             {expandedReasoning[msg.id] ? (
-                              <ChevronDown size={16} style={{ color: msg.isStreaming ? '#aaa' : 'inherit', flexShrink: 0 }} />
+                              <ChevronDown size={16} style={{ color: msg.isStreaming ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
                             ) : (
-                              <ChevronRight size={16} style={{ color: msg.isStreaming ? '#aaa' : 'inherit', flexShrink: 0 }} />
+                              <ChevronRight size={16} style={{ color: msg.isStreaming ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
                             )}
                             <span>{msg.isStreaming ? 'Reasoning' : 'Finished Reasoning'}</span>
                           </div>
@@ -1767,10 +1224,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                             <div style={{
                               marginTop: '0.5rem',
                               padding: '1rem',
-                              background: 'rgba(30, 30, 30, 0.6)',
+                              background: isDark ? 'rgba(30, 30, 30, 0.6)' : 'rgba(0, 0, 0, 0.04)',
                               borderRadius: '8px',
-                              border: '1px solid rgba(255,255,255,0.08)',
-                              color: '#aaa',
+                              border: `1px solid ${theme.border}`,
+                              color: theme.textSecondary,
                               fontSize: '0.85rem',
                               lineHeight: '1.6',
                               whiteSpace: 'pre-wrap',
@@ -1793,7 +1250,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                             gap: '6px',
                             fontSize: '0.9rem',
                             fontWeight: '500',
-                            backgroundImage: 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)',
+                            backgroundImage: isDark 
+                              ? 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)'
+                              : 'linear-gradient(90deg, #999 0%, #555 50%, #999 100%)',
                             backgroundSize: '200% 100%',
                             backgroundClip: 'text',
                             WebkitBackgroundClip: 'text',
@@ -1806,7 +1265,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                       )}
                       {/* Content - always show if there's content, even while streaming */}
                       {msg.content && (
-                        <div style={{ lineHeight: '1.6', color: '#e0e0e0' }}>
+                        <div style={{ lineHeight: '1.6', color: theme.text }}>
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             rehypePlugins={[rehypeHighlight]}
@@ -1857,8 +1316,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               ul: ({ children }) => <ul style={{ marginLeft: '1.5rem', margin: '0.5rem 0' }}>{children}</ul>,
                               ol: ({ children }) => <ol style={{ marginLeft: '1.5rem', margin: '0.5rem 0' }}>{children}</ol>,
                               li: ({ children }) => <li style={{ margin: '0.25rem 0' }}>{children}</li>,
-                              a: ({ children, href }) => <a href={href} style={{ color: '#6ea8fe', textDecoration: 'underline' }} target="_blank" rel="noopener noreferrer">{children}</a>,
-                              blockquote: ({ children }) => <blockquote style={{ borderLeft: '3px solid #555', paddingLeft: '1rem', margin: '0.5rem 0', color: '#aaa' }}>{children}</blockquote>,
+                              a: ({ children, href }) => <a href={href} style={{ color: isDark ? '#8ab4f8' : '#1a73e8', textDecoration: 'underline' }} target="_blank" rel="noopener noreferrer">{children}</a>,
+                              blockquote: ({ children }) => <blockquote style={{ borderLeft: `3px solid ${theme.border}`, paddingLeft: '1rem', margin: '0.5rem 0', color: theme.textSecondary }}>{children}</blockquote>,
                               h1: ({ children }) => <h1 style={{ fontSize: '1.5rem', fontWeight: '600', margin: '1rem 0 0.5rem' }}>{children}</h1>,
                               h2: ({ children }) => <h2 style={{ fontSize: '1.3rem', fontWeight: '600', margin: '1rem 0 0.5rem' }}>{children}</h2>,
                               h3: ({ children }) => <h3 style={{ fontSize: '1.1rem', fontWeight: '600', margin: '0.75rem 0 0.5rem' }}>{children}</h3>,
@@ -1978,7 +1437,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
-                                color: showInfoDropdown === msg.id ? '#aaa' : '#666',
+                                color: showInfoDropdown === msg.id ? theme.textSecondary : theme.textMuted,
                                 transition: 'color 0.2s'
                               }}
                               onMouseEnter={(e) => {
@@ -1986,7 +1445,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               }}
                               onMouseLeave={(e) => {
                                 if (showInfoDropdown !== msg.id) {
-                                  e.currentTarget.style.color = '#666';
+                                  e.currentTarget.style.color = theme.textMuted;
                                 }
                               }}
                               title="Message info"
@@ -2007,12 +1466,12 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                     ? { bottom: '100%', marginBottom: '4px' } 
                                     : { top: '100%', marginTop: '4px' }),
                                   left: '0',
-                                  background: '#1e1e1e',
-                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  background: theme.bgSecondary,
+                                  border: `1px solid ${theme.border}`,
                                   borderRadius: '8px',
                                   padding: '10px 14px',
                                   zIndex: 100,
-                                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+                                  boxShadow: isDark ? '0 4px 20px rgba(0,0,0,0.5)' : '0 4px 20px rgba(0,0,0,0.15)'
                                 }}>
                                   <table style={{ 
                                     borderCollapse: 'collapse', 
@@ -2024,41 +1483,41 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                       {/* Model */}
                                       {msg.model && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>model:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.model.split('/').pop()}</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>model:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.model.split('/').pop()}</td>
                                         </tr>
                                       )}
                                       {/* Total Duration */}
                                       {msg.stats?.total_duration && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>total duration:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.total_duration / 1e9).toFixed(2)}s</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>total duration:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.total_duration / 1e9).toFixed(2)}s</td>
                                         </tr>
                                       )}
                                       {/* Load Duration */}
                                       {msg.stats?.load_duration && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>load duration:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.load_duration / 1e6).toFixed(2)}ms</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>load duration:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.load_duration / 1e6).toFixed(2)}ms</td>
                                         </tr>
                                       )}
                                       {/* Prompt Eval */}
                                       {msg.stats?.prompt_eval_count && (
                                         <>
                                           <tr>
-                                            <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval count:</td>
-                                            <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.stats.prompt_eval_count} token(s)</td>
+                                            <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval count:</td>
+                                            <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.stats.prompt_eval_count} token(s)</td>
                                           </tr>
                                           {msg.stats.prompt_eval_duration && (
                                             <tr>
-                                              <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval duration:</td>
-                                              <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.prompt_eval_duration / 1e6).toFixed(2)}ms</td>
+                                              <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval duration:</td>
+                                              <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.prompt_eval_duration / 1e6).toFixed(2)}ms</td>
                                             </tr>
                                           )}
                                           {msg.stats.prompt_eval_duration && (
                                             <tr>
-                                              <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval rate:</td>
-                                              <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.prompt_eval_count / (msg.stats.prompt_eval_duration / 1e9)).toFixed(2)} tokens/s</td>
+                                              <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>prompt eval rate:</td>
+                                              <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.prompt_eval_count / (msg.stats.prompt_eval_duration / 1e9)).toFixed(2)} tokens/s</td>
                                             </tr>
                                           )}
                                         </>
@@ -2067,18 +1526,18 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                       {msg.stats?.eval_count && (
                                         <>
                                           <tr>
-                                            <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>eval count:</td>
-                                            <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.stats.eval_count} token(s)</td>
+                                            <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>eval count:</td>
+                                            <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.stats.eval_count} token(s)</td>
                                           </tr>
                                           {msg.stats.eval_duration && (
                                             <tr>
-                                              <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>eval duration:</td>
-                                              <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.eval_duration / 1e6).toFixed(2)}ms</td>
+                                              <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>eval duration:</td>
+                                              <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{(msg.stats.eval_duration / 1e6).toFixed(2)}ms</td>
                                             </tr>
                                           )}
                                           <tr>
-                                            <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>eval rate:</td>
-                                            <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                            <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>eval rate:</td>
+                                            <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>
                                               {msg.stats.eval_rate 
                                                 ? `${msg.stats.eval_rate} tokens/s`
                                                 : msg.stats.eval_duration 
@@ -2092,34 +1551,34 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                       {!msg.stats?.total_duration && !msg.stats?.eval_count && (
                                         <>
                                           <tr>
-                                            <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>tokens (est.):</td>
-                                            <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.content ? Math.ceil(msg.content.length / 4) : 0}</td>
+                                            <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>tokens (est.):</td>
+                                            <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.content ? Math.ceil(msg.content.length / 4) : 0}</td>
                                           </tr>
                                           <tr>
-                                            <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>characters:</td>
-                                            <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.content?.length || 0}</td>
+                                            <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>characters:</td>
+                                            <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.content?.length || 0}</td>
                                           </tr>
                                         </>
                                       )}
                                       {/* Reasoning */}
                                       {msg.thinking && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>reasoning:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.thinking.length} chars</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>reasoning:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.thinking.length} chars</td>
                                         </tr>
                                       )}
                                       {/* Sources */}
                                       {msg.sources && msg.sources.length > 0 && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>sources:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.sources.length}</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>sources:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.sources.length}</td>
                                         </tr>
                                       )}
                                       {/* Tool Calls */}
                                       {msg.toolCalls && msg.toolCalls.length > 0 && (
                                         <tr>
-                                          <td style={{ color: '#888', paddingRight: '20px', whiteSpace: 'nowrap' }}>tool calls:</td>
-                                          <td style={{ color: '#e0e0e0', textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.toolCalls.length}</td>
+                                          <td style={{ color: theme.textSecondary, paddingRight: '20px', whiteSpace: 'nowrap' }}>tool calls:</td>
+                                          <td style={{ color: theme.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{msg.toolCalls.length}</td>
                                         </tr>
                                       )}
                                     </tbody>
@@ -2174,7 +1633,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                               animation: 'shimmer 2s linear infinite'
                             }}
                           >
-                            <Image size={16} style={{ color: '#aaa' }} />
+                            <Image size={16} style={{ color: theme.textSecondary }} />
                             <span>{imageGenProgress || 'Generating image...'}</span>
                           </div>
                           {/* Image placeholder */}
@@ -2216,10 +1675,22 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                   )}
                 </div>
               ))}
-            </div>
           </div>
+        )}
+      </div>
+
+      {/* Input box - only at bottom when chat is active */}
+      {!isNewChat && (
+        <div style={{
+          padding: '1.5rem',
+          paddingBottom: '2rem',
+          maxWidth: '800px',
+          margin: '0 auto',
+          width: '100%',
+          transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}>
           {inputBox}
-        </>
+        </div>
       )}
 
       {/* Fullscreen Image Modal */}
