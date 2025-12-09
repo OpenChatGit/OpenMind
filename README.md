@@ -1,5 +1,7 @@
 # OpenMind
 
+![Version](https://img.shields.io/badge/version-0.5.1-blue)
+
 A modern AI chat application built with Electron, React, and local LLM support via Ollama with local image generation.
 
 ## Features
