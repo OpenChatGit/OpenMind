@@ -44,6 +44,25 @@ def is_gguf_model(path):
                 return True
     return False
 
+def is_single_file_model(path):
+    """Check if path is a single checkpoint file (.safetensors, .ckpt)"""
+    if not path or not os.path.isfile(path):
+        return False
+    ext = os.path.splitext(path)[1].lower()
+    return ext in ['.safetensors', '.ckpt', '.pt', '.pth']
+
+def is_diffusers_model(path):
+    """Check if path is a Diffusers model directory"""
+    if not path or not os.path.isdir(path):
+        return False
+    # Check for model_index.json (main indicator)
+    if os.path.exists(os.path.join(path, 'model_index.json')):
+        return True
+    # Check for typical diffusers subdirectories
+    subdirs = ['unet', 'vae', 'text_encoder', 'scheduler', 'tokenizer']
+    existing = [d for d in subdirs if os.path.isdir(os.path.join(path, d))]
+    return len(existing) >= 2
+
 def find_gguf_file(path):
     """Find the best GGUF file in a directory"""
     if path.endswith('.gguf') and os.path.isfile(path):
@@ -189,16 +208,56 @@ def load_model(model_id, local_path=None):
             dtype = torch.float32
             send_progress("Using CPU (slow)")
         
-        if local_path:
-            send_progress(f"Loading from local: {local_path}...")
-        else:
-            send_progress(f"Downloading/loading {model_id}...")
-        
-        # Try different pipeline types
         loaded = False
+        is_single_file = local_path and is_single_file_model(local_path)
         
-        # Try AutoPipeline first (works for most models)
-        if not loaded:
+        # Check if this is a single file model (.safetensors, .ckpt)
+        if is_single_file:
+            send_progress(f"Loading single file model: {os.path.basename(local_path)}...")
+            
+            # Try to load as single file checkpoint
+            try:
+                # For SDXL single files
+                if 'xl' in local_path.lower() or 'sdxl' in local_path.lower():
+                    pipeline = StableDiffusionXLPipeline.from_single_file(
+                        local_path,
+                        torch_dtype=dtype,
+                        use_safetensors=local_path.endswith('.safetensors')
+                    )
+                    loaded = True
+                    send_progress("Loaded as SDXL model")
+                else:
+                    # Try SD 1.5/2.x single file
+                    pipeline = StableDiffusionPipeline.from_single_file(
+                        local_path,
+                        torch_dtype=dtype,
+                        safety_checker=None,
+                        use_safetensors=local_path.endswith('.safetensors')
+                    )
+                    loaded = True
+                    send_progress("Loaded as SD 1.5/2.x model")
+            except Exception as e:
+                # If SD 1.5 failed, try SDXL as fallback
+                send_progress(f"SD 1.5 load failed, trying SDXL...")
+                try:
+                    pipeline = StableDiffusionXLPipeline.from_single_file(
+                        local_path,
+                        torch_dtype=dtype,
+                        use_safetensors=local_path.endswith('.safetensors')
+                    )
+                    loaded = True
+                    send_progress("Loaded as SDXL model (fallback)")
+                except Exception as e2:
+                    send_progress(f"Single file load failed: {str(e)[:80]}")
+        
+        # For directories or HuggingFace models (NOT single files!)
+        if not loaded and not is_single_file:
+            if local_path:
+                send_progress(f"Loading from local: {local_path}...")
+            else:
+                send_progress(f"Downloading/loading {model_id}...")
+            
+            # Try AutoPipeline first (works for most models)
             try:
                 pipeline = AutoPipelineForText2Image.from_pretrained(
                     model_source,
@@ -211,8 +270,8 @@ def load_model(model_id, local_path=None):
             except Exception as e:
                 send_progress(f"AutoPipeline failed, trying alternatives...")
         
-        # Try SDXL Pipeline
-        if not loaded:
+        # Try SDXL Pipeline (only for directories/HF models)
+        if not loaded and not is_single_file:
             try:
                 pipeline = StableDiffusionXLPipeline.from_pretrained(
                     model_source,
@@ -223,8 +282,8 @@ def load_model(model_id, local_path=None):
             except:
                 pass
         
-        # Try SD Pipeline
-        if not loaded:
+        # Try SD Pipeline (only for directories/HF models)
+        if not loaded and not is_single_file:
             try:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     model_source,
@@ -236,8 +295,8 @@ def load_model(model_id, local_path=None):
             except:
                 pass
         
-        # Try generic DiffusionPipeline
-        if not loaded:
+        # Try generic DiffusionPipeline (only for directories/HF models)
+        if not loaded and not is_single_file:
             try:
                 pipeline = DiffusionPipeline.from_pretrained(
                     model_source,
@@ -247,6 +306,10 @@ def load_model(model_id, local_path=None):
                 loaded = True
             except Exception as e:
                 raise Exception(f"Could not load model with any pipeline: {str(e)}")
+        
+        # Final check - if still not loaded, raise error
+        if not loaded:
+            raise Exception(f"Could not load model. Single file: {is_single_file}, Path: {local_path or model_id}")
         
         pipeline = pipeline.to(device)
         

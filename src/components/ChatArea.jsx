@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Image, Copy, Info, RotateCcw, Check } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Image, Copy, Info, RotateCcw, Check, Terminal, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import ChartRenderer from './ChartRenderer';
+import XTerminal from './XTerminal';
 import { useTheme } from '../contexts/ThemeContext';
 
 const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, inferenceSettings }) => {
@@ -31,6 +33,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [showInfoDropdown, setShowInfoDropdown] = useState(null); // Track which message info dropdown is open
   const [infoDropdownPosition, setInfoDropdownPosition] = useState('below'); // 'above' or 'below'
   const [fullscreenImage, setFullscreenImage] = useState(null); // Fullscreen image modal
+
+  // Terminal mode state - now using real PTY terminal
+  const [terminalMode, setTerminalMode] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0); // 0-100 for glow effect
 
   // Typewriter effect state
   const [typewriterText, setTypewriterText] = useState('');
@@ -246,11 +252,27 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   // Image generation progress state
   const [imageGenProgress, setImageGenProgress] = useState('');
 
+
+
   // Listen for image generation progress
   useEffect(() => {
     if (window.electronAPI?.onImageGenProgress) {
       window.electronAPI.onImageGenProgress((data) => {
         setImageGenProgress(data.message || '');
+      });
+    }
+  }, []);
+
+  // Listen for terminal download progress (ollama pull)
+  useEffect(() => {
+    if (window.electronAPI?.onOllamaTerminalProgress) {
+      window.electronAPI.onOllamaTerminalProgress((data) => {
+        if (data.done) {
+          // Reset progress immediately when done
+          setDownloadProgress(0);
+        } else if (data.percent !== undefined && data.percent > 0) {
+          setDownloadProgress(data.percent);
+        }
       });
     }
   }, []);
@@ -581,15 +603,41 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       background: theme.bgSecondary,
       borderRadius: '20px',
       padding: '16px',
-      boxShadow: isNewChat 
-        ? (isDark ? '0 0 20px rgba(255, 255, 255, 0.04)' : '0 0 20px rgba(0,0,0,0.06)')
-        : 'none',
+      boxShadow: downloadProgress > 0 
+        ? `0 0 ${10 + downloadProgress * 0.3}px rgba(${isDark ? '255,255,255' : '0,0,0'}, ${0.1 + downloadProgress * 0.004}), inset 0 0 ${downloadProgress * 0.5}px rgba(${isDark ? '255,255,255' : '0,0,0'}, 0.05)`
+        : (isNewChat 
+          ? (isDark ? '0 0 20px rgba(255, 255, 255, 0.04)' : '0 0 20px rgba(0,0,0,0.06)')
+          : 'none'),
       display: 'flex',
       flexDirection: 'column',
       gap: '12px',
-      border: isNewChat ? `1px solid ${theme.border}` : 'none',
-      transition: 'box-shadow 0.4s ease, border 0.4s ease'
+      border: downloadProgress > 0
+        ? `1px solid rgba(${isDark ? '255,255,255' : '0,0,0'}, ${0.2 + downloadProgress * 0.005})`
+        : (isNewChat ? `1px solid ${theme.border}` : 'none'),
+      transition: 'box-shadow 0.3s ease, border 0.3s ease',
+      position: 'relative'
     }}>
+      {/* Download progress bar */}
+      {downloadProgress > 0 && (
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '2px',
+          borderRadius: '0 0 20px 20px',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${downloadProgress}%`,
+            background: isDark 
+              ? 'linear-gradient(90deg, rgba(255,255,255,0.3), rgba(255,255,255,0.6))'
+              : 'linear-gradient(90deg, rgba(0,0,0,0.2), rgba(0,0,0,0.4))',
+            transition: 'width 0.3s ease'
+          }} />
+        </div>
+      )}
         {/* Attached Images Preview */}
         {attachedImages.length > 0 && (
           <div style={{
@@ -643,30 +691,41 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           </div>
         )}
 
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
+        {/* Input area - terminal is persistent, just hidden when not active */}
+        {/* Terminal - always mounted but only initializes when first visible */}
+        <XTerminal isDark={isDark} height={120} isVisible={terminalMode} />
+        
+        {/* Normal chat input - hidden when terminal is active */}
+        {!terminalMode && (
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            onPaste={handlePaste}
+            placeholder={
+              imageGenEnabled 
+                ? "Describe the image you want to generate..." 
+                : (attachedImages.length > 0 ? "Ask about the image(s)..." : "Message AI")
             }
-          }}
-          onPaste={handlePaste}
-          placeholder={imageGenEnabled ? "Describe the image you want to generate..." : (attachedImages.length > 0 ? "Ask about the image(s)..." : "Message AI")}
-          style={{
-            width: '100%',
-            background: 'transparent',
-            border: 'none',
-            color: theme.text,
-            resize: 'none',
-            outline: 'none',
-            fontFamily: 'inherit',
-            fontSize: '1rem',
-            height: '40px',
-            minHeight: '40px'
-          }}
-        />
+            style={{
+              width: '100%',
+              background: 'transparent',
+              border: 'none',
+              color: theme.text,
+              resize: 'none',
+              outline: 'none',
+              fontFamily: 'inherit',
+              fontSize: '1rem',
+              height: '40px',
+              minHeight: '40px'
+            }}
+          />
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -884,7 +943,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               {isModelMenuOpen && (
                 <>
                   <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                    style={{ position: 'fixed', inset: 0, zIndex: 999 }}
                     onClick={() => setIsModelMenuOpen(false)}
                   />
                   <div style={{
@@ -900,7 +959,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                     maxHeight: '300px',
                     overflowY: 'auto',
                     boxShadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 10px 25px rgba(0,0,0,0.15)',
-                    zIndex: 100,
+                    zIndex: 1000,
                     backdropFilter: 'blur(10px)'
                   }}>
                     {imageGenEnabled ? (
@@ -1007,6 +1066,66 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               )}
             </div>
 
+            {/* Terminal Toggle Button - opens real PTY terminal panel */}
+            <button
+              onClick={() => setTerminalMode(!terminalMode)}
+              style={{
+                background: terminalMode 
+                  ? (isDark ? 'white' : '#1a1a1a')
+                  : 'transparent',
+                border: terminalMode 
+                  ? 'none'
+                  : `2px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                color: terminalMode 
+                  ? (isDark ? 'black' : 'white')
+                  : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              title={terminalMode ? 'Hide Terminal' : 'Open Terminal'}
+            >
+              <Terminal size={16} />
+            </button>
+
+            {/* Kill Terminal Button - only visible in terminal mode */}
+            {terminalMode && (
+              <button
+                onClick={() => {
+                  window.electronAPI?.ptyKill?.();
+                }}
+                style={{
+                  background: 'transparent',
+                  border: `2px solid ${isDark ? 'rgba(239,68,68,0.5)' : 'rgba(220,38,38,0.5)'}`,
+                  color: isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = isDark ? 'rgba(239,68,68,0.2)' : 'rgba(220,38,38,0.1)';
+                  e.currentTarget.style.borderColor = isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = isDark ? 'rgba(239,68,68,0.5)' : 'rgba(220,38,38,0.5)';
+                }}
+                title="Kill Terminal Process"
+              >
+                <Square size={14} fill="currentColor" />
+              </button>
+            )}
+
             <button
               onClick={handleSend}
               style={{
@@ -1031,6 +1150,13 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             </button>
           </div>
         </div>
+
+        <style>{`
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
     </div>
   );
 
@@ -1265,9 +1391,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                       )}
                       {/* Content - always show if there's content, even while streaming */}
                       {msg.content && (
-                        <div style={{ lineHeight: '1.6', color: theme.text }}>
+                        <div style={{ lineHeight: '1.7', color: theme.text }}>
                           <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
                             rehypePlugins={[rehypeHighlight]}
                             components={{
                               code: ({ node, className, children, ...props }) => {
@@ -1760,6 +1886,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           </div>
         </div>
       )}
+
+
     </div>
   );
 };

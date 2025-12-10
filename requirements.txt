@@ -1,0 +1,54 @@
+# OpenMind Image Generation Dependencies
+# ========================================
+# 
+# AUTOMATIC SETUP (RECOMMENDED):
+#   node scripts/setup-python.js
+#
+# This will:
+#   - Create a virtual environment
+#   - Detect your GPU and install CUDA-enabled packages
+#   - Install all required dependencies
+#
+# MANUAL INSTALLATION:
+# --------------------
+
+# Core packages (installed automatically)
+torch
+torchvision
+diffusers
+transformers
+accelerate
+safetensors
+
+# GGUF model support
+stable-diffusion-cpp-python
+
+# ============================================================
+# GPU/CUDA SUPPORT
+# ============================================================
+#
+# For NVIDIA GPU acceleration, you need:
+#   1. NVIDIA GPU with CUDA support
+#   2. NVIDIA drivers installed
+#   3. (Optional) CUDA Toolkit for compiling stable-diffusion-cpp
+#
+# The setup script automatically:
+#   - Detects your GPU via nvidia-smi
+#   - Installs PyTorch with CUDA from pytorch.org
+#   - Compiles stable-diffusion-cpp with CUDA if toolkit is present
+#
+# MANUAL PyTorch CUDA installation:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# MANUAL stable-diffusion-cpp CUDA installation:
+#   Windows (PowerShell):
+#     $env:CMAKE_ARGS="-DSD_CUDA=ON"
+#     pip install stable-diffusion-cpp-python --force-reinstall --no-cache-dir
+#
+#   Linux/Mac:
+#     CMAKE_ARGS="-DSD_CUDA=ON" pip install stable-diffusion-cpp-python --force-reinstall
+#
+# Prerequisites for CUDA compilation:
+#   - NVIDIA CUDA Toolkit (nvcc in PATH)
+#   - CMake
+#   - Visual Studio Build Tools (Windows) or GCC (Linux)

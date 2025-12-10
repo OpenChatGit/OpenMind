@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onOllamaPullProgress: (callback) => ipcRenderer.on('ollama-pull-progress', (event, data) => callback(data)),
     sendOllamaMessage: (model, messages) => ipcRenderer.invoke('send-ollama-message', { model, messages }),
     sendDeepSearchMessage: (model, messages) => ipcRenderer.invoke('send-deepsearch-message', { model, messages }),
+    executeOllamaCommand: (command) => ipcRenderer.invoke('execute-ollama-command', command),
+    onOllamaTerminalProgress: (callback) => ipcRenderer.on('ollama-terminal-progress', (event, data) => callback(data)),
     
     onThinkingUpdate: (callback) => ipcRenderer.on('ollama-thinking-update', (event, thinking) => callback(thinking)),
     onMessageUpdate: (callback) => ipcRenderer.on('ollama-message-update', (event, message) => callback(message)),
@@ -90,4 +92,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searchHfInferenceModels: (query) => ipcRenderer.invoke('hf-search-inference-models', query),
     sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages }),
     
+    // PTY Terminal API (real terminal via node-pty)
+    ptyCreate: (options) => ipcRenderer.invoke('pty-create', options),
+    ptyWrite: (data) => ipcRenderer.invoke('pty-write', data),
+    ptyResize: (cols, rows) => ipcRenderer.invoke('pty-resize', { cols, rows }),
+    ptyKill: () => ipcRenderer.invoke('pty-kill'),
+    ptyStatus: () => ipcRenderer.invoke('pty-status'),
+    onPtyData: (callback) => ipcRenderer.on('pty-data', (event, data) => callback(data)),
+    onPtyExit: (callback) => ipcRenderer.on('pty-exit', (event, data) => callback(data)),
+    removePtyListeners: () => {
+        ipcRenderer.removeAllListeners('pty-data');
+        ipcRenderer.removeAllListeners('pty-exit');
+    }
 });

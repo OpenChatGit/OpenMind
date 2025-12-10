@@ -89,16 +89,34 @@ function detectModelType(modelPath) {
     }
     return 'llm'; // Default GGUF to LLM (Ollama/llama.cpp format)
   }
+  
   if (ext === '.safetensors' || ext === '.ckpt') {
-    // Could be either - check filename for hints
-    if (name.includes('sd') || name.includes('diffusion') || 
-        name.includes('sdxl') || name.includes('flux')) {
+    // Diffusion model indicators
+    const diffusionKeywords = [
+      'sd', 'stable', 'diffusion', 'sdxl', 'flux', 'turbo', 
+      'dreamshaper', 'realistic', 'anime', 'deliberate', 
+      'protogen', 'openjourney', 'midjourney', 'anything',
+      'counterfeit', 'waifu', 'pastel', 'rev', 'epic',
+      'photon', 'juggernaut', 'realvis', 'cyberrealistic',
+      'v1-5', 'v2-1', 'xl-base', 'inpainting', 'img2img'
+    ];
+    
+    // LLM model indicators
+    const llmKeywords = ['llama', 'mistral', 'qwen', 'phi', 'gemma', 'falcon', 'mpt', 'gpt'];
+    
+    // Check for diffusion keywords
+    if (diffusionKeywords.some(kw => name.includes(kw))) {
       return 'diffusion';
     }
-    if (name.includes('llama') || name.includes('mistral') || 
-        name.includes('qwen') || name.includes('phi')) {
+    
+    // Check for LLM keywords
+    if (llmKeywords.some(kw => name.includes(kw))) {
       return 'llm';
     }
+    
+    // Default safetensors/ckpt to diffusion (more common use case)
+    // Most single-file safetensors in a models folder are SD checkpoints
+    return 'diffusion';
   }
   
   return 'unknown';

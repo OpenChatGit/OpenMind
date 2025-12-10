@@ -33,6 +33,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "^3.5.0",
     "rehype-highlight": "^7.0.2",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "seti-ui": "^1.11.0",
     "shiki": "^3.17.0",

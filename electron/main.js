@@ -10,6 +10,7 @@ const imageGen = require('./imageGen');
 const ollama = require('./ollama');
 const ollamaManager = require('./ollamaManager');
 const localLlama = require('./localLlama');
+const ptyTerminal = require('./ptyTerminal');
 
 let mainWindow;
 let ollamaHost = '127.0.0.1';
@@ -127,6 +128,16 @@ ipcMain.handle('delete-ollama-model', async (event, modelName) => {
 ipcMain.handle('get-ollama-model-info', async (event, modelName) => {
     const host = `http://${ollamaHost}:11434`;
     return await ollama.showModel(modelName, host);
+});
+
+// Execute Ollama CLI Command (for terminal mode)
+ipcMain.handle('execute-ollama-command', async (event, command) => {
+    console.log('Executing Ollama command:', command);
+    return await ollama.executeCommand(command, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ollama-terminal-progress', progress);
+        }
+    });
 });
 
 // ============ Local LLM (node-llama-cpp) ============
@@ -987,7 +998,37 @@ ipcMain.handle('save-settings', async (event, settings) => {
     }
 });
 
+// ============ PTY Terminal IPC Handlers ============
+
+// Create/start PTY terminal
+ipcMain.handle('pty-create', async (event, options = {}) => {
+    return ptyTerminal.createPty(mainWindow, options);
+});
+
+// Write to PTY (user input)
+ipcMain.handle('pty-write', async (event, data) => {
+    return ptyTerminal.writeToPty(data);
+});
+
+// Resize PTY
+ipcMain.handle('pty-resize', async (event, { cols, rows }) => {
+    return ptyTerminal.resizePty(cols, rows);
+});
+
+// Kill PTY
+ipcMain.handle('pty-kill', async () => {
+    return ptyTerminal.killPty();
+});
+
+// Get PTY status
+ipcMain.handle('pty-status', async () => {
+    return ptyTerminal.getPtyInfo();
+});
+
 app.on('window-all-closed', async () => {
+    // Kill PTY terminal
+    ptyTerminal.killPty();
+    
     // Close DeepSearch browser
     await closeBrowser();
     

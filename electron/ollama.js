@@ -254,6 +254,126 @@ async function listRunning(host = currentHost) {
     }
 }
 
+// Strip ANSI escape codes from text
+function stripAnsi(text) {
+    // Remove all ANSI escape sequences comprehensively
+    return text
+        // ESC sequences
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+        .replace(/\x1B\][^\x07]*\x07/g, '')
+        .replace(/\x1B[PX^_].*?\x1B\\/g, '')
+        .replace(/\x1B\[[\?]?[0-9;]*[a-zA-Z]/g, '')
+        // Remaining escape chars
+        .replace(/\x1B/g, '')
+        // Control characters (except newline and tab)
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+        // Leftover bracket sequences
+        .replace(/\[\??\d*[a-zA-Z]/g, '')
+        .replace(/\[K/g, '')
+        .replace(/\[1G/g, '')
+        .replace(/\[A/g, '')
+        // Progress bar characters we want to keep readable
+        .replace(/[▕▏█ ]+/g, ' ')
+        .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, '')
+        // Clean up whitespace
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Execute arbitrary ollama CLI command with progress callback for pull
+async function executeCommand(command, onProgress = null, host = currentHost) {
+    const { spawn } = require('child_process');
+    
+    // Parse the command - support common ollama commands
+    let trimmedCmd = command.trim();
+    
+    // Normalize command - remove 'ollama' prefix if present
+    if (trimmedCmd.toLowerCase().startsWith('ollama ')) {
+        trimmedCmd = trimmedCmd.substring(7).trim();
+    }
+    
+    const parts = trimmedCmd.split(/\s+/);
+    const subCommand = parts[0]?.toLowerCase();
+    const args = parts.slice(1);
+    
+    return new Promise((resolve) => {
+        const proc = spawn('ollama', [subCommand, ...args], {
+            shell: true
+        });
+        
+        let output = '';
+        let lastProgress = 0;
+        
+        const processData = (data) => {
+            const rawText = data.toString();
+            const text = stripAnsi(rawText);
+            output += text + '\n';
+            
+            // Parse progress for pull commands
+            if (subCommand === 'pull' && onProgress) {
+                // Ollama outputs progress like: "pulling abc123... 45% ▕████      ▏ 1.2 GB/2.5 GB"
+                const percentMatch = rawText.match(/(\d+)%/);
+                if (percentMatch) {
+                    const percent = parseInt(percentMatch[1], 10);
+                    if (percent !== lastProgress) {
+                        lastProgress = percent;
+                        onProgress({ percent, status: `Downloading... ${percent}%` });
+                    }
+                }
+                
+                // Check for status messages
+                if (text.includes('verifying')) {
+                    onProgress({ status: 'Verifying...', percent: 100 });
+                } else if (text.includes('writing manifest')) {
+                    onProgress({ status: 'Writing manifest...', percent: 100 });
+                } else if (text.includes('success')) {
+                    onProgress({ status: 'Complete!', percent: 100, done: true });
+                }
+            }
+        };
+        
+        proc.stdout.on('data', processData);
+        proc.stderr.on('data', processData);
+        
+        proc.on('close', (code) => {
+            // Always send done signal on close for pull commands
+            if (subCommand === 'pull' && onProgress) {
+                onProgress({ percent: 0, done: true, status: code === 0 ? 'Complete!' : 'Failed' });
+            }
+            
+            // Clean up output - remove empty lines and duplicates
+            const cleanOutput = output
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0)
+                .filter((line, index, arr) => arr.indexOf(line) === index)
+                .join('\n');
+            
+            if (code === 0) {
+                resolve({ success: true, output: cleanOutput || 'Command completed' });
+            } else {
+                resolve({ success: false, error: cleanOutput || 'Command failed' });
+            }
+        });
+        
+        proc.on('error', (error) => {
+            if (subCommand === 'pull' && onProgress) {
+                onProgress({ percent: 0, done: true, status: 'Error' });
+            }
+            resolve({ success: false, error: error.message });
+        });
+        
+        // Timeout after 10 minutes for pull commands
+        setTimeout(() => {
+            proc.kill();
+            if (subCommand === 'pull' && onProgress) {
+                onProgress({ percent: 0, done: true, status: 'Timeout' });
+            }
+            resolve({ success: false, error: 'Command timed out' });
+        }, 600000);
+    });
+}
+
 module.exports = {
     getClient,
     setHost,
@@ -265,5 +385,6 @@ module.exports = {
     showModel,
     deleteModel,
     listRunning,
-    extractThinkTags
+    extractThinkTags,
+    executeCommand
 };
