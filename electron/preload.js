@@ -103,5 +103,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removePtyListeners: () => {
         ipcRenderer.removeAllListeners('pty-data');
         ipcRenderer.removeAllListeners('pty-exit');
-    }
+    },
+    
+    // SearXNG Web Search API
+    searxngSearch: (query, options) => ipcRenderer.invoke('searxng:search', query, options),
+    searxngStatus: () => ipcRenderer.invoke('searxng:status'),
+    searxngCategories: () => ipcRenderer.invoke('searxng:categories')
 });

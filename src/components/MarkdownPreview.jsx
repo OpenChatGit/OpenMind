@@ -124,7 +124,7 @@ const parseMarkdown = (text) => {
   return result.join('\n');
 };
 
-const MarkdownPreview = ({ content, filename }) => {
+const MarkdownPreview = ({ content, filename, isDark = true }) => {
   const htmlContent = useMemo(() => parseMarkdown(content), [content]);
 
   return (
@@ -132,16 +132,16 @@ const MarkdownPreview = ({ content, filename }) => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: '#1e1e1e',
+      background: isDark ? '#1e1e1e' : '#ffffff',
       overflow: 'hidden'
     }}>
       <div 
-        className="md-preview"
+        className={`md-preview ${isDark ? 'md-dark' : 'md-light'}`}
         style={{
           flex: 1,
           padding: '24px 32px',
           overflowY: 'auto',
-          color: '#d4d4d4',
+          color: isDark ? '#d4d4d4' : '#24292e',
           fontSize: '0.9rem',
           lineHeight: '1.6'
         }}
@@ -224,6 +224,37 @@ const MarkdownPreview = ({ content, filename }) => {
           max-width: 100%;
           border-radius: 6px;
           margin: 8px 0;
+        }
+        
+        /* Light mode overrides */
+        .md-preview.md-light h1,
+        .md-preview.md-light h2,
+        .md-preview.md-light h3 {
+          color: #1a1a1a;
+        }
+        .md-preview.md-light h1 {
+          border-bottom-color: #d0d7de;
+        }
+        .md-preview.md-light strong {
+          color: #1a1a1a;
+        }
+        .md-preview.md-light a {
+          color: #0969da;
+        }
+        .md-preview.md-light .md-code-block {
+          background: #f6f8fa;
+          border: 1px solid #d0d7de;
+        }
+        .md-preview.md-light .md-inline-code {
+          background: #f6f8fa;
+          color: #1a1a1a;
+        }
+        .md-preview.md-light blockquote {
+          border-left-color: #d0d7de;
+          color: #57606a;
+        }
+        .md-preview.md-light hr {
+          border-top-color: #d0d7de;
         }
       `}</style>
     </div>

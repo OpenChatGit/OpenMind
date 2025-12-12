@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Image, Copy, Info, RotateCcw, Check, Terminal, Square } from 'lucide-react';
+import { Paperclip, ArrowUp, ChevronDown, ChevronRight, Radar, Image, Copy, Info, RotateCcw, Check, Terminal, Square, ExternalLink, Minimize2, X, GripHorizontal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -11,13 +11,22 @@ import { useTheme } from '../contexts/ThemeContext';
 const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, inferenceSettings }) => {
   const { theme, isDark } = useTheme();
   const [input, setInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem('selectedModel') || '';
+  });
   const [availableModels, setAvailableModels] = useState([]);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [expandedReasoning, setExpandedReasoning] = useState({});
   const [expandedToolCalls, setExpandedToolCalls] = useState({});
-  const [deepSearchEnabled, setDeepSearchEnabled] = useState(false);
+  const [deepSearchEnabled, setDeepSearchEnabled] = useState(() => {
+    const saved = localStorage.getItem('deepSearchEnabled');
+    return saved === 'true';
+  });
   const [isDeepSearching, setIsDeepSearching] = useState(false);
+  const [isWebSearching, setIsWebSearching] = useState(false); // Currently executing web_search tool
+  const [isReasoning, setIsReasoning] = useState(false); // Currently in reasoning phase (before content)
+  const [searchedFavicons, setSearchedFavicons] = useState([]); // Favicons from searched sites
+  const searchedFaviconsRef = useRef([]); // Ref to track current favicons for saving
   const [searchSources, setSearchSources] = useState([]); // URLs from web search
   const [currentSources, setCurrentSources] = useState([]); // Sources for current streaming message
   const [currentPreviews, setCurrentPreviews] = useState([]); // Preview images/cards
@@ -29,6 +38,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [selectedImageModel, setSelectedImageModel] = useState(''); // Selected image gen model
 
   const [hoveredMessageId, setHoveredMessageId] = useState(null); // Track hovered message for action buttons
+  const [hoveredReasoningId, setHoveredReasoningId] = useState(null); // Track hovered reasoning block for favicon animation
   const [copiedMessageId, setCopiedMessageId] = useState(null); // Track which message was copied
   const [showInfoDropdown, setShowInfoDropdown] = useState(null); // Track which message info dropdown is open
   const [infoDropdownPosition, setInfoDropdownPosition] = useState('below'); // 'above' or 'below'
@@ -36,7 +46,19 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
   // Terminal mode state - now using real PTY terminal
   const [terminalMode, setTerminalMode] = useState(false);
+  const [terminalPopout, setTerminalPopout] = useState(false); // Floating terminal window
+  const [terminalPosition, setTerminalPosition] = useState({ x: 100, y: 100 });
+  const [terminalSize, setTerminalSize] = useState({ width: 600, height: 350 });
+  const [isDraggingTerminal, setIsDraggingTerminal] = useState(false);
+  const [isResizingTerminal, setIsResizingTerminal] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [downloadProgress, setDownloadProgress] = useState(0); // 0-100 for glow effect
+
+  // Zoom level for accessibility (Ctrl + scroll wheel)
+  const [zoomLevel, setZoomLevel] = useState(() => {
+    const saved = localStorage.getItem('chat-zoom-level');
+    return saved ? parseFloat(saved) : 1;
+  });
 
   // Typewriter effect state
   const [typewriterText, setTypewriterText] = useState('');
@@ -91,16 +113,156 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     return () => clearTimeout(timeout);
   }, [typewriterIndex, isNewChat]);
 
-  // ESC key to close fullscreen image
+  // Save zoom level to localStorage
+  useEffect(() => {
+    localStorage.setItem('chat-zoom-level', zoomLevel.toString());
+  }, [zoomLevel]);
+
+  // Save deepSearch preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('deepSearchEnabled', deepSearchEnabled.toString());
+  }, [deepSearchEnabled]);
+
+  // Save selected model to localStorage
+  useEffect(() => {
+    if (selectedModel && selectedModel !== 'No Models Found') {
+      localStorage.setItem('selectedModel', selectedModel);
+    }
+  }, [selectedModel]);
+
+  // Auto-collapse reasoning block when reasoning finishes
+  useEffect(() => {
+    if (!isReasoning && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage?.isStreaming && lastMessage?.role === 'assistant') {
+        // Collapse the reasoning block for the current streaming message
+        setExpandedReasoning(prev => ({
+          ...prev,
+          [lastMessage.id]: false
+        }));
+      }
+    }
+  }, [isReasoning, messages]);
+
+  // Ctrl + scroll wheel to zoom
+  const chatContainerRef = useRef(null);
+  
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoomLevel(prev => {
+          const newZoom = Math.min(2, Math.max(0.5, prev + delta));
+          return Math.round(newZoom * 10) / 10; // Round to 1 decimal
+        });
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Reset zoom with Ctrl+0
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && fullscreenImage) {
-        setFullscreenImage(null);
+      if (e.ctrlKey && e.key === '0') {
+        e.preventDefault();
+        setZoomLevel(1);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fullscreenImage]);
+  }, []);
+
+  // ESC key to close fullscreen image or popout terminal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (fullscreenImage) setFullscreenImage(null);
+        if (terminalPopout) setTerminalPopout(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fullscreenImage, terminalPopout]);
+
+  // Terminal drag handlers
+  const handleTerminalDragStart = (e) => {
+    if (e.target.closest('.terminal-resize-handle')) return;
+    setIsDraggingTerminal(true);
+    setDragOffset({
+      x: e.clientX - terminalPosition.x,
+      y: e.clientY - terminalPosition.y
+    });
+  };
+
+  const handleTerminalDrag = (e) => {
+    if (!isDraggingTerminal) return;
+    setTerminalPosition({
+      x: Math.max(0, e.clientX - dragOffset.x),
+      y: Math.max(0, e.clientY - dragOffset.y)
+    });
+  };
+
+  const handleTerminalDragEnd = () => {
+    setIsDraggingTerminal(false);
+  };
+
+  // Terminal resize handlers
+  const handleTerminalResizeStart = (e) => {
+    e.stopPropagation();
+    setIsResizingTerminal(true);
+  };
+
+  const handleTerminalResize = (e) => {
+    if (!isResizingTerminal) return;
+    const newWidth = Math.max(400, e.clientX - terminalPosition.x);
+    const newHeight = Math.max(200, e.clientY - terminalPosition.y);
+    setTerminalSize({ width: newWidth, height: newHeight });
+  };
+
+  const handleTerminalResizeEnd = () => {
+    setIsResizingTerminal(false);
+  };
+
+  // Global mouse handlers for drag/resize
+  useEffect(() => {
+    if (isDraggingTerminal) {
+      // Set cursor to default globally while dragging
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'none';
+      
+      window.addEventListener('mousemove', handleTerminalDrag);
+      window.addEventListener('mouseup', handleTerminalDragEnd);
+      return () => {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', handleTerminalDrag);
+        window.removeEventListener('mouseup', handleTerminalDragEnd);
+      };
+    }
+  }, [isDraggingTerminal, dragOffset]);
+
+  useEffect(() => {
+    if (isResizingTerminal) {
+      // Set cursor to default globally while resizing
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'none';
+      
+      window.addEventListener('mousemove', handleTerminalResize);
+      window.addEventListener('mouseup', handleTerminalResizeEnd);
+      return () => {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', handleTerminalResize);
+        window.removeEventListener('mouseup', handleTerminalResizeEnd);
+      };
+    }
+  }, [isResizingTerminal, terminalPosition]);
 
 
   
@@ -112,11 +274,16 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     if (window.electronAPI?.getOllamaModels) {
       const models = await window.electronAPI.getOllamaModels();
       if (models && models.length > 0) {
-        setAvailableModels(models.map(m => m.name));
-        // Only set default model if none selected - use functional update to avoid dependency
+        const modelNames = models.map(m => m.name);
+        setAvailableModels(modelNames);
+        // Check if saved model is still available, otherwise use first available
         setSelectedModel(prev => {
           if (!prev || prev === 'No Models Found') {
-            return models[0].name;
+            return modelNames[0];
+          }
+          // If saved model is not in available models, use first one
+          if (!modelNames.includes(prev)) {
+            return modelNames[0];
           }
           return prev;
         });
@@ -161,6 +328,14 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     // Listen for DeepSearch tool results to show sources and live tool calls
     if (window.electronAPI?.onDeepSearchToolUse) {
       window.electronAPI.onDeepSearchToolUse((data) => {
+        // Track web search status for UI indicator
+        if (data.tool === 'web_search') {
+          if (data.status === 'executing') {
+            setIsWebSearching(true);
+          }
+          // Note: setIsWebSearching(false) is called AFTER favicons are set below
+        }
+        
         // Track live tool calls (with deduplication)
         if (data.status === 'executing') {
           setCurrentToolCalls(prev => {
@@ -183,12 +358,39 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           ));
         }
         
-        // Track sources and previews from web search
+        // Track sources, favicons and previews from web search
         if (data.tool === 'web_search' && data.status === 'complete' && data.result?.results) {
           const results = data.result.results;
           const urls = results.filter(r => r.url).map(r => r.url);
           setSearchSources(prev => [...new Set([...prev, ...urls])]);
           setCurrentSources(prev => [...new Set([...prev, ...urls])]);
+          
+          // Extract favicons from URLs (max 6, deduplicated by domain)
+          const seenDomains = new Set();
+          const favicons = urls
+            .map(url => {
+              try {
+                const hostname = new URL(url).hostname;
+                if (seenDomains.has(hostname)) return null;
+                seenDomains.add(hostname);
+                return {
+                  url: url,
+                  domain: hostname
+                };
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean)
+            .slice(0, 6);
+          
+          setSearchedFavicons(prev => {
+            const existing = new Set(prev.map(f => f.domain));
+            const newFavicons = favicons.filter(f => !existing.has(f.domain));
+            const updated = [...prev, ...newFavicons].slice(0, 6);
+            searchedFaviconsRef.current = updated; // Keep ref in sync
+            return updated;
+          });
           
           // Extract previews (images, thumbnails)
           const previews = results
@@ -203,6 +405,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           if (previews.length > 0) {
             setCurrentPreviews(prev => [...prev, ...previews]);
           }
+          
+          // Set isWebSearching to false AFTER favicons are set
+          setIsWebSearching(false);
         }
       });
     }
@@ -402,9 +607,11 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
     let currentThinking = '';
     let currentContent = '';
+    setIsReasoning(true); // Start in reasoning phase
 
     const thinkingListener = (thinking) => {
       currentThinking = thinking;
+      setIsReasoning(true); // Still reasoning while thinking updates come in
       onUpdateMessages(chatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -416,6 +623,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
     const messageListener = (content) => {
       currentContent = content;
+      if (content) setIsReasoning(false); // Reasoning done when content starts
       onUpdateMessages(chatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -433,28 +641,54 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       if (deepSearchEnabled) {
         // DeepSearch mode with tool use (includes web search, file search, etc.)
         setIsDeepSearching(true);
+        setIsWebSearching(false);
         setSearchSources([]); // Reset sources for new search
         setCurrentSources([]); // Reset current sources
         setCurrentPreviews([]); // Reset previews for new search
+        setSearchedFavicons([]); // Reset favicons for new search
+        searchedFaviconsRef.current = []; // Reset ref too
         setCurrentToolCalls([]); // Reset tool calls for new search
         setExpandedToolCalls(prev => ({ ...prev, [assistantMessageId]: true })); // Auto-expand tool calls
         setExpandedReasoning(prev => ({ ...prev, [assistantMessageId]: true })); // Auto-expand reasoning during DeepSearch
+        
+        // Extract URLs from user message and show their favicons immediately
+        const urlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
+        const urlsInMessage = inputText.match(urlRegex) || [];
+        if (urlsInMessage.length > 0) {
+          setIsWebSearching(true); // Show "Searching Web" when URLs are present
+          const urlFavicons = urlsInMessage.slice(0, 6).map(url => {
+            try {
+              const hostname = new URL(url).hostname;
+              return { url, domain: hostname };
+            } catch {
+              return null;
+            }
+          }).filter(Boolean);
+          if (urlFavicons.length > 0) {
+            setSearchedFavicons(urlFavicons);
+            searchedFaviconsRef.current = urlFavicons;
+          }
+        }
+        
         response = await window.electronAPI.sendDeepSearchMessage(selectedModel, newMessages);
         setIsDeepSearching(false);
+        setIsReasoning(false);
       } else {
         // Normal streaming mode (Local Ollama)
         response = await window.electronAPI.sendOllamaMessage(selectedModel, newMessages);
       }
       
       // Use the streamed values to avoid flicker
+      // Use ref for favicons to get the current value (state might be stale in callback)
+      const finalFavicons = searchedFaviconsRef.current;
       onUpdateMessages(chatId, [...newMessages, {
         role: 'assistant',
         content: currentContent || response.content,
         thinking: currentThinking || response.thinking,
         sources: deepSearchEnabled ? [...currentSources] : [], // Include search sources
+        favicons: deepSearchEnabled ? [...finalFavicons] : [], // Include favicons for hover display
         toolCalls: deepSearchEnabled ? [...currentToolCalls] : [], // Include tool calls
         previews: deepSearchEnabled ? [...currentPreviews] : [], // Include preview images
-
         stats: response.stats || {}, // Include inference stats
         model: selectedModel, // Include model used
         id: assistantMessageId,
@@ -463,11 +697,15 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       setCurrentSources([]); // Clear after saving
       setCurrentToolCalls([]); // Clear tool calls after saving
       setCurrentPreviews([]); // Clear previews after saving
+      setSearchedFavicons([]); // Clear favicons after saving
+      searchedFaviconsRef.current = []; // Clear ref too
+      setIsReasoning(false); // Reset reasoning state
       
 
     } catch (error) {
       console.error('Inference error:', error);
       setIsDeepSearching(false);
+      setIsReasoning(false);
       
       // Build helpful error message
       const errorMsg = 'Error: Could not connect to Ollama. Is it running?';
@@ -524,9 +762,11 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     
     let currentThinking = '';
     let currentContent = '';
+    setIsReasoning(true); // Start in reasoning phase
 
     const thinkingListener = (thinking) => {
       currentThinking = thinking;
+      setIsReasoning(true); // Still reasoning
       onUpdateMessages(activeChatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -538,6 +778,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
 
     const messageListener = (content) => {
       currentContent = content;
+      if (content) setIsReasoning(false); // Reasoning done when content starts
       onUpdateMessages(activeChatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -555,12 +796,17 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       // Use the correct API based on provider
       if (deepSearchEnabled) {
         setIsDeepSearching(true);
+        setIsWebSearching(false);
+        setIsReasoning(true);
         setSearchSources([]);
         setCurrentSources([]);
         setCurrentPreviews([]);
+        setSearchedFavicons([]);
+        searchedFaviconsRef.current = [];
         setCurrentToolCalls([]);
         response = await window.electronAPI.sendDeepSearchMessage(selectedModel, newMessages);
         setIsDeepSearching(false);
+        setIsReasoning(false);
       } else {
         response = await window.electronAPI.sendOllamaMessage(selectedModel, newMessages);
       }
@@ -570,6 +816,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         content: currentContent || response.content,
         thinking: currentThinking || response.thinking,
         sources: deepSearchEnabled ? [...currentSources] : [],
+        favicons: deepSearchEnabled ? [...searchedFaviconsRef.current] : [],
         toolCalls: deepSearchEnabled ? [...currentToolCalls] : [],
         previews: deepSearchEnabled ? [...currentPreviews] : [],
         stats: response.stats || {},
@@ -580,9 +827,12 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       setCurrentSources([]);
       setCurrentToolCalls([]);
       setCurrentPreviews([]);
+      setSearchedFavicons([]);
+      searchedFaviconsRef.current = [];
     } catch (error) {
       console.error('Regenerate error:', error);
       setIsDeepSearching(false);
+      setIsReasoning(false);
       
       // Build helpful error message
       const errorMsg = error?.message ? `Error: ${error.message}` : 'Error: Could not regenerate response.';
@@ -692,8 +942,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         )}
 
         {/* Input area - terminal is persistent, just hidden when not active */}
-        {/* Terminal - always mounted but only initializes when first visible */}
-        <XTerminal isDark={isDark} height={120} isVisible={terminalMode} />
+        {/* Terminal - inline mode (not popped out) */}
+        {!terminalPopout && (
+          <XTerminal isDark={isDark} height={120} isVisible={terminalMode} />
+        )}
         
         {/* Normal chat input - hidden when terminal is active */}
         {!terminalMode && (
@@ -1093,8 +1345,34 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               <Terminal size={16} />
             </button>
 
+            {/* Popout Terminal Button - only visible in terminal mode */}
+            {terminalMode && !terminalPopout && (
+              <button
+                onClick={() => {
+                  setTerminalPopout(true);
+                  setTerminalMode(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: `2px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                  color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                title="Pop out terminal"
+              >
+                <ExternalLink size={14} />
+              </button>
+            )}
+
             {/* Kill Terminal Button - only visible in terminal mode */}
-            {terminalMode && (
+            {(terminalMode || terminalPopout) && (
               <button
                 onClick={() => {
                   window.electronAPI?.ptyKill?.();
@@ -1161,22 +1439,61 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   );
 
   return (
-    <div style={{
-      flex: 1,
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      position: 'relative',
-      zIndex: 10,
-      overflow: 'hidden'
-    }}>
+    <div 
+      ref={chatContainerRef}
+      style={{
+        flex: 1,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        zIndex: 10,
+        overflow: 'hidden'
+      }}
+    >
+      {/* Zoom indicator */}
+      {zoomLevel !== 1 && (
+        <div style={{
+          position: 'absolute',
+          top: '8px',
+          right: '8px',
+          background: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)',
+          color: theme.text,
+          padding: '4px 8px',
+          borderRadius: '4px',
+          fontSize: '0.75rem',
+          zIndex: 100,
+          border: `1px solid ${theme.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px'
+        }}>
+          <span>{Math.round(zoomLevel * 100)}%</span>
+          <button
+            onClick={() => setZoomLevel(1)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: theme.textSecondary,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '0.7rem'
+            }}
+            title="Reset zoom (Ctrl+0)"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {/* Messages area - always present but empty when new chat */}
       <div style={{ 
         flex: 1, 
         overflowY: 'auto', 
         overflowX: 'hidden',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        fontSize: `${zoomLevel}rem`,
+        lineHeight: 1.6
       }}>
         {isNewChat ? (
           /* Centered welcome content with input */
@@ -1296,57 +1613,127 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                     >
                       {/* TODO: Sources, Previews, and Tool Calls will be redesigned later */}
 
-                      {/* Reasoning block for reasoning models */}
-                      {msg.thinking && (
+                      {/* Reasoning/Web Search block */}
+                      {(msg.thinking || (msg.isStreaming && isDeepSearching) || (msg.favicons && msg.favicons.length > 0)) && (
                         <div>
                           <div
                             onClick={() => setExpandedReasoning(prev => ({
                               ...prev,
                               [msg.id]: !prev[msg.id]
                             }))}
-                            style={msg.isStreaming ? {
+                            onMouseEnter={() => setHoveredReasoningId(msg.id)}
+                            onMouseLeave={() => setHoveredReasoningId(null)}
+                            style={{
                               cursor: 'pointer',
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: '6px',
+                              gap: '8px',
                               fontSize: '0.9rem',
                               fontWeight: '500',
                               marginBottom: '0.5rem',
-                              backgroundImage: isDark 
-                                ? 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)'
-                                : 'linear-gradient(90deg, #999 0%, #555 50%, #999 100%)',
-                              backgroundSize: '200% 100%',
-                              backgroundClip: 'text',
-                              WebkitBackgroundClip: 'text',
-                              color: 'transparent',
-                              animation: 'shimmer 2s linear infinite'
-                            } : {
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              fontSize: '0.9rem',
-                              fontWeight: '500',
-                              marginBottom: '0.5rem',
-                              color: theme.textSecondary,
-                              transition: 'color 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!msg.isStreaming) e.currentTarget.style.color = theme.text;
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!msg.isStreaming) e.currentTarget.style.color = theme.textSecondary;
+                              color: (msg.isStreaming && (isReasoning || isWebSearching)) ? 'transparent' : (hoveredReasoningId === msg.id ? theme.text : theme.textSecondary),
+                              transition: 'color 0.2s',
+                              ...((msg.isStreaming && (isReasoning || isWebSearching)) && {
+                                backgroundImage: isDark 
+                                  ? 'linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%)'
+                                  : 'linear-gradient(90deg, #999 0%, #555 50%, #999 100%)',
+                                backgroundSize: '200% 100%',
+                                backgroundClip: 'text',
+                                WebkitBackgroundClip: 'text',
+                                animation: 'shimmer 2s linear infinite'
+                              })
                             }}
                           >
                             {expandedReasoning[msg.id] ? (
-                              <ChevronDown size={16} style={{ color: msg.isStreaming ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
+                              <ChevronDown size={16} style={{ color: (msg.isStreaming && (isReasoning || isWebSearching)) ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
                             ) : (
-                              <ChevronRight size={16} style={{ color: msg.isStreaming ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
+                              <ChevronRight size={16} style={{ color: (msg.isStreaming && (isReasoning || isWebSearching)) ? theme.textSecondary : 'inherit', flexShrink: 0 }} />
                             )}
-                            <span>{msg.isStreaming ? 'Reasoning' : 'Finished Reasoning'}</span>
+                            <span>
+                              {msg.isStreaming 
+                                ? (isWebSearching ? 'Searching Web' : (isReasoning ? 'Reasoning' : 'Finished Reasoning'))
+                                : 'Finished Reasoning'
+                              }
+                            </span>
+                            
+                            {/* Favicons during streaming - always visible when they exist, hidden only when content is being written */}
+                            {searchedFavicons.length > 0 && msg.isStreaming && (
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                marginLeft: '4px',
+                                overflow: 'hidden',
+                                maxWidth: (!msg.content || hoveredReasoningId === msg.id) ? '150px' : '0px',
+                                opacity: (!msg.content || hoveredReasoningId === msg.id) ? 1 : 0,
+                                transition: 'max-width 0.3s ease, opacity 0.3s ease'
+                              }}>
+                                {searchedFavicons.slice(0, 6).map((fav, idx) => (
+                                  <img
+                                    key={fav.domain + idx}
+                                    src={`https://www.google.com/s2/favicons?domain=${fav.domain}&sz=32`}
+                                    alt={fav.domain}
+                                    title={fav.domain}
+                                    style={{
+                                      width: '16px',
+                                      height: '16px',
+                                      borderRadius: '3px',
+                                      opacity: 0.9,
+                                      flexShrink: 0
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            
+                            {/* Show saved favicons for completed messages - slide in on hover */}
+                            {!msg.isStreaming && msg.favicons && msg.favicons.length > 0 && (
+                              <div 
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  marginLeft: '4px',
+                                  overflow: 'hidden',
+                                  maxWidth: hoveredReasoningId === msg.id ? '150px' : '0px',
+                                  opacity: hoveredReasoningId === msg.id ? 1 : 0,
+                                  transition: 'max-width 0.3s ease, opacity 0.3s ease'
+                                }}
+                              >
+                                {msg.favicons.slice(0, 6).map((fav, idx) => (
+                                  <img
+                                    key={fav.domain + idx}
+                                    src={`https://www.google.com/s2/favicons?domain=${fav.domain}&sz=32`}
+                                    alt={fav.domain}
+                                    title={fav.domain}
+                                    style={{
+                                      width: '16px',
+                                      height: '16px',
+                                      borderRadius: '3px',
+                                      opacity: 0.9,
+                                      cursor: 'pointer',
+                                      flexShrink: 0,
+                                      transition: 'opacity 0.2s, transform 0.2s'
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.electronAPI?.openExternal(fav.url);
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.target.style.opacity = 1;
+                                      e.target.style.transform = 'scale(1.15)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.target.style.opacity = 0.9;
+                                      e.target.style.transform = 'scale(1)';
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
                           </div>
 
-                          {expandedReasoning[msg.id] && (
+                          {expandedReasoning[msg.id] && msg.thinking && (
                             <div style={{
                               marginTop: '0.5rem',
                               padding: '1rem',
@@ -1367,8 +1754,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                           )}
                         </div>
                       )}
-                      {/* Thinking indicator for non-reasoning models (not for image generation) */}
-                      {msg.isStreaming && !msg.thinking && !msg.content && !msg.isGenerating && (
+                      {/* Thinking indicator for non-reasoning models (not for image generation) - only show when no reasoning block is visible */}
+                      {msg.isStreaming && !msg.thinking && !msg.content && !msg.isGenerating && !isDeepSearching && (
                         <div
                           style={{
                             display: 'inline-flex',
@@ -1414,42 +1801,43 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                 
                                 return isInline ? (
                                   <code style={{
-                                    background: 'rgba(255,255,255,0.1)',
-                                    padding: '2px 6px',
+                                    background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                                    padding: '0.15em 0.4em',
                                     borderRadius: '4px',
                                     fontSize: '0.9em',
                                     fontFamily: 'ui-monospace, monospace',
-                                    color: '#f0f0f0'
+                                    color: isDark ? '#f0f0f0' : '#1a1a1a'
                                   }} {...props}>{children}</code>
                                 ) : (
                                   <code className={className} style={{
                                     display: 'block',
-                                    background: 'rgba(30, 30, 30, 0.6)',
-                                    padding: '1rem',
+                                    background: isDark ? 'rgba(30, 30, 30, 0.6)' : '#f6f8fa',
+                                    padding: '1em',
                                     borderRadius: '8px',
-                                    border: '1px solid rgba(255,255,255,0.08)',
+                                    border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.1)',
                                     overflowX: 'auto',
-                                    fontSize: '0.85rem',
+                                    fontSize: '0.85em',
                                     fontFamily: 'ui-monospace, monospace',
                                     lineHeight: '1.6',
                                     whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word'
+                                    wordBreak: 'break-word',
+                                    color: isDark ? '#e0e0e0' : '#24292e'
                                   }} {...props}>{children}</code>
                                 );
                               },
-                              pre: ({ children }) => <div style={{ margin: '0.5rem 0' }}>{children}</div>,
-                              p: ({ children }) => <p style={{ margin: '0.5rem 0', lineHeight: '1.6' }}>{children}</p>,
-                              ul: ({ children }) => <ul style={{ marginLeft: '1.5rem', margin: '0.5rem 0' }}>{children}</ul>,
-                              ol: ({ children }) => <ol style={{ marginLeft: '1.5rem', margin: '0.5rem 0' }}>{children}</ol>,
-                              li: ({ children }) => <li style={{ margin: '0.25rem 0' }}>{children}</li>,
+                              pre: ({ children }) => <div style={{ margin: '0.5em 0' }}>{children}</div>,
+                              p: ({ children }) => <p style={{ margin: '0.5em 0', lineHeight: '1.6' }}>{children}</p>,
+                              ul: ({ children }) => <ul style={{ marginLeft: '1.5em', margin: '0.5em 0' }}>{children}</ul>,
+                              ol: ({ children }) => <ol style={{ marginLeft: '1.5em', margin: '0.5em 0' }}>{children}</ol>,
+                              li: ({ children }) => <li style={{ margin: '0.25em 0' }}>{children}</li>,
                               a: ({ children, href }) => <a href={href} style={{ color: isDark ? '#8ab4f8' : '#1a73e8', textDecoration: 'underline' }} target="_blank" rel="noopener noreferrer">{children}</a>,
-                              blockquote: ({ children }) => <blockquote style={{ borderLeft: `3px solid ${theme.border}`, paddingLeft: '1rem', margin: '0.5rem 0', color: theme.textSecondary }}>{children}</blockquote>,
-                              h1: ({ children }) => <h1 style={{ fontSize: '1.5rem', fontWeight: '600', margin: '1rem 0 0.5rem' }}>{children}</h1>,
-                              h2: ({ children }) => <h2 style={{ fontSize: '1.3rem', fontWeight: '600', margin: '1rem 0 0.5rem' }}>{children}</h2>,
-                              h3: ({ children }) => <h3 style={{ fontSize: '1.1rem', fontWeight: '600', margin: '0.75rem 0 0.5rem' }}>{children}</h3>,
-                              table: ({ children }) => <table style={{ borderCollapse: 'collapse', margin: '0.5rem 0', width: '100%' }}>{children}</table>,
-                              th: ({ children }) => <th style={{ border: '1px solid #555', padding: '0.5rem', background: 'rgba(255,255,255,0.05)' }}>{children}</th>,
-                              td: ({ children }) => <td style={{ border: '1px solid #555', padding: '0.5rem' }}>{children}</td>,
+                              blockquote: ({ children }) => <blockquote style={{ borderLeft: `3px solid ${theme.border}`, paddingLeft: '1em', margin: '0.5em 0', color: theme.textSecondary }}>{children}</blockquote>,
+                              h1: ({ children }) => <h1 style={{ fontSize: '1.5em', fontWeight: '600', margin: '1em 0 0.5em' }}>{children}</h1>,
+                              h2: ({ children }) => <h2 style={{ fontSize: '1.3em', fontWeight: '600', margin: '1em 0 0.5em' }}>{children}</h2>,
+                              h3: ({ children }) => <h3 style={{ fontSize: '1.1em', fontWeight: '600', margin: '0.75em 0 0.5em' }}>{children}</h3>,
+                              table: ({ children }) => <table style={{ borderCollapse: 'collapse', margin: '0.5em 0', width: '100%' }}>{children}</table>,
+                              th: ({ children }) => <th style={{ border: `1px solid ${isDark ? '#555' : '#d0d7de'}`, padding: '0.5em', background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>{children}</th>,
+                              td: ({ children }) => <td style={{ border: `1px solid ${isDark ? '#555' : '#d0d7de'}`, padding: '0.5em' }}>{children}</td>,
                               img: ({ src, alt }) => (
                                 <img 
                                   src={src} 
@@ -1460,7 +1848,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                                     borderRadius: '8px',
                                     margin: '0.5rem 0',
                                     objectFit: 'contain',
-                                    border: '1px solid rgba(255,255,255,0.1)'
+                                    border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)'
                                   }}
                                   loading="lazy"
                                 />
@@ -1887,6 +2275,114 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         </div>
       )}
 
+      {/* Floating Terminal Window */}
+      {terminalPopout && (
+        <div
+          style={{
+            position: 'fixed',
+            left: terminalPosition.x,
+            top: terminalPosition.y,
+            width: terminalSize.width,
+            height: terminalSize.height,
+            background: '#0d0d0d',
+            borderRadius: '8px 8px 0 0',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            userSelect: (isDraggingTerminal || isResizingTerminal) ? 'none' : 'auto',
+            cursor: isDraggingTerminal ? 'default' : 'auto'
+          }}
+        >
+          {/* Compact Title Bar */}
+          <div
+            onMouseDown={handleTerminalDragStart}
+            style={{
+              padding: '4px 8px',
+              background: '#1a1a1a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: isDraggingTerminal ? 'default' : 'grab',
+              borderRadius: '8px 8px 0 0'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Terminal size={12} style={{ color: '#4CAF50' }} />
+              <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.7rem', fontWeight: 500 }}>
+                Terminal
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+              {/* Dock back button */}
+              <button
+                onClick={() => {
+                  setTerminalPopout(false);
+                  setTerminalMode(true);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.4)',
+                  cursor: 'pointer',
+                  padding: '3px',
+                  borderRadius: '3px',
+                  display: 'flex'
+                }}
+                title="Dock to input area"
+              >
+                <Minimize2 size={12} />
+              </button>
+              {/* Close button */}
+              <button
+                onClick={() => {
+                  setTerminalPopout(false);
+                  setTerminalMode(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.4)',
+                  cursor: 'pointer',
+                  padding: '3px',
+                  borderRadius: '3px',
+                  display: 'flex'
+                }}
+                title="Close terminal"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Content - no border, no rounding */}
+          <div style={{ flex: 1, overflow: 'hidden', background: '#0d0d0d' }}>
+            <XTerminal isDark={true} height={terminalSize.height - 28} isVisible={true} />
+          </div>
+
+          {/* Resize Handle */}
+          <div
+            className="terminal-resize-handle"
+            onMouseDown={handleTerminalResizeStart}
+            style={{
+              position: 'absolute',
+              right: 0,
+              bottom: 0,
+              width: '20px',
+              height: '20px',
+              cursor: isResizingTerminal ? 'default' : 'nwse-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+              <path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        </div>
+      )}
 
     </div>
   );

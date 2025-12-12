@@ -11,10 +11,51 @@ const ollama = require('./ollama');
 const ollamaManager = require('./ollamaManager');
 const localLlama = require('./localLlama');
 const ptyTerminal = require('./ptyTerminal');
+const searxng = require('./searxng');
 
 let mainWindow;
 let ollamaHost = '127.0.0.1';
 let lastOllamaStatus = 'stopped';
+
+// Store custom model system prompts (model name -> system prompt)
+let customModelPrompts = {};
+
+// Load custom model prompts from file
+function loadCustomModelPrompts() {
+    try {
+        const promptsPath = path.join(app.getPath('userData'), 'custom-model-prompts.json');
+        if (fs.existsSync(promptsPath)) {
+            customModelPrompts = JSON.parse(fs.readFileSync(promptsPath, 'utf8'));
+            console.log('Loaded custom model prompts:', Object.keys(customModelPrompts));
+        }
+    } catch (err) {
+        console.error('Error loading custom model prompts:', err);
+    }
+}
+
+// Save custom model prompts to file
+function saveCustomModelPrompts() {
+    try {
+        const promptsPath = path.join(app.getPath('userData'), 'custom-model-prompts.json');
+        fs.writeFileSync(promptsPath, JSON.stringify(customModelPrompts, null, 2));
+    } catch (err) {
+        console.error('Error saving custom model prompts:', err);
+    }
+}
+
+// Get system prompt for a model (if it's a custom model)
+function getModelSystemPrompt(modelName) {
+    // Check exact match first
+    if (customModelPrompts[modelName]) {
+        return customModelPrompts[modelName];
+    }
+    // Check without tag (e.g., "my-model" matches "my-model:latest")
+    const baseName = modelName.split(':')[0];
+    if (customModelPrompts[baseName]) {
+        return customModelPrompts[baseName];
+    }
+    return null;
+}
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -75,7 +116,9 @@ ipcMain.handle('get-ollama-server-status', async () => {
 });
 
 ipcMain.handle('start-ollama-server', async () => {
+    console.log('Starting bundled Ollama server...');
     return await ollamaManager.startServer((log) => {
+        console.log('[Ollama Server]', log.type, log.message);
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ollama-server-log', log);
         }
@@ -198,6 +241,23 @@ ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
 
     const host = `http://${ollamaHost}:11434`;
     
+    // Check if this is a custom model with a saved system prompt
+    const customSystemPrompt = getModelSystemPrompt(model);
+    let finalMessages = messages;
+    
+    if (customSystemPrompt) {
+        console.log('Using custom system prompt for model:', model);
+        // Check if there's already a system message
+        const hasSystemMessage = messages.some(m => m.role === 'system');
+        if (!hasSystemMessage) {
+            // Prepend the custom system prompt
+            finalMessages = [
+                { role: 'system', content: customSystemPrompt },
+                ...messages
+            ];
+        }
+    }
+    
     // Callbacks for streaming updates
     const onThinking = (thinking) => {
         try {
@@ -220,7 +280,7 @@ ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
     };
 
     try {
-        const response = await ollama.chat({ model, messages, host }, onThinking, onContent);
+        const response = await ollama.chat({ model, messages: finalMessages, host }, onThinking, onContent);
         console.log('Stream complete');
         return response;
     } catch (error) {
@@ -292,31 +352,36 @@ ipcMain.handle('send-deepsearch-message', async (event, { model, messages }) => 
     
     const tools = getDeepSearchTools();
 
+    const now = new Date();
+    const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const currentYear = now.getFullYear();
+    
     const systemPrompt = {
         role: 'system',
-        content: `You have tools: web_search, system_search, list_directory, read_file.
+        content: `TODAY IS: ${currentDate} (Year: ${currentYear})
 
-USE tools when needed:
-- web_search: Current events, news, facts you're unsure about
-- list_directory: Show what's in a folder (Desktop, Documents, etc.)
-- system_search: Find files by name
-- read_file: Read file contents
+You have access to web_search tool that fetches LIVE, REAL-TIME data from the internet.
+
+USE web_search when needed for:
+- Current events, news, recent information
+- Facts you're unsure about or need to verify
+- Software versions, releases, updates (fetches LIVE data from GitHub API)
+- Any topic requiring up-to-date information
+- Questions about "today", "this week", "this month", "this year" (${currentYear})
 
 IMPORTANT RULES:
-- Call each tool ONLY ONCE per request. Do NOT repeat the same tool call.
-- After receiving tool results, respond to the user immediately using those results.
-- Do NOT use tools for general conversation, greetings, or questions you can answer.
-- When you use a tool, you MUST use the results in your response.
+- Call web_search ONLY ONCE per request. Do NOT repeat the same search.
+- After receiving search results, respond immediately using those results.
+- Do NOT use web_search for general conversation or questions you can answer confidently.
+- ALWAYS prefer search results over your training data for versions, dates, and current facts.
+- The search results are LIVE and REAL-TIME. Trust them completely.
+- When results say "Latest Release: vX.Y.Z" - report it exactly as shown.
+- Your training data may be outdated. When in doubt, search.
 
-CRITICAL - THINKING/REASONING RULES:
-You MUST follow these rules for your internal thinking:
-1. Your thinking MUST be under 500 words. This is a HARD LIMIT.
-2. Think in 3 steps maximum: (1) Understand the question (2) Decide action (3) Execute
-3. FORBIDDEN phrases in thinking: "But wait", "Actually", "Let me reconsider", "Hmm", "On second thought", "Wait", "However, I should"
-4. Once you decide something, DO IT. No going back. No reconsidering.
-5. If you catch yourself about to write "But wait" - STOP and give your answer instead.
-6. Be DECISIVE. First instinct is usually correct. Trust it.
-7. Your thinking is for YOU, not the user. Keep it minimal and efficient.`
+THINKING RULES:
+1. Keep thinking under 500 words.
+2. Think in 3 steps max: (1) Understand (2) Decide (3) Execute
+3. Be DECISIVE. First instinct is usually correct.`
     };
     
     let allMessages = [systemPrompt, ...compressedMessages];
@@ -446,7 +511,8 @@ You MUST follow these rules for your internal thinking:
                     
                 finalResponse = {
                     thinking: finalThinking,
-                    content: response.message?.content || 'No response'
+                    content: response.message?.content || 'No response',
+                    stats: response.stats || {}
                 };
                 break;
             }
@@ -667,6 +733,8 @@ ipcMain.handle('check-python-setup', async () => {
 // Model Creator - Create custom Ollama models
 ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPrompt, params }) => {
     console.log('Creating Ollama model:', { name, baseModel });
+    console.log('System prompt received:', systemPrompt?.substring(0, 100) + '...');
+    console.log('Params received:', params);
     
     const sendProgress = (type, message) => {
         try {
@@ -707,12 +775,15 @@ ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPro
         
         // Add system prompt
         if (systemPrompt && systemPrompt.trim()) {
-            // Escape quotes in system prompt
-            const escapedPrompt = systemPrompt.replace(/"/g, '\\"');
-            modelfile += `SYSTEM """${systemPrompt}"""\n`;
+            // SYSTEM instruction sets the default system message
+            // Note: The system prompt is baked into the model and used automatically
+            modelfile += `SYSTEM """${systemPrompt.trim()}"""\n`;
         }
         
-        console.log('Generated Modelfile:\n', modelfile);
+        console.log('=== Generated Modelfile ===');
+        console.log(modelfile);
+        console.log('=== End Modelfile ===');
+        sendProgress('info', `System prompt length: ${systemPrompt?.length || 0} chars`);
         sendProgress('info', 'Modelfile generiert, starte ollama create...');
         
         // Write temporary Modelfile
@@ -774,6 +845,12 @@ ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPro
                 
                 if (code === 0) {
                     console.log('Model created successfully');
+                    // Save the system prompt for this custom model
+                    if (systemPrompt && systemPrompt.trim()) {
+                        customModelPrompts[name] = systemPrompt.trim();
+                        saveCustomModelPrompts();
+                        console.log('Saved system prompt for model:', name);
+                    }
                     resolve({ success: true, name });
                 } else {
                     console.error('Model creation failed with code:', code);
@@ -803,13 +880,23 @@ ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPro
 app.whenReady().then(async () => {
     console.log('=== Electron App Starting ===');
     
+    // Load custom model system prompts
+    loadCustomModelPrompts();
+    
     // Try to connect to Ollama (optional - app works without it)
     console.log('Checking for Ollama...');
     const ollamaRunning = await ollamaManager.isServerRunning();
     if (ollamaRunning) {
         console.log('✓ Ollama server detected');
     } else {
-        console.log('ℹ Ollama not running - local GGUF models available via node-llama-cpp');
+        console.log('ℹ Ollama not running');
+        // Check if bundled Ollama is available
+        if (ollamaManager.hasBundledOllama()) {
+            console.log('✓ Bundled Ollama available at:', ollamaManager.getBundledOllamaPath());
+            console.log('  Click "Start Server" in the sidebar to start Ollama');
+        } else {
+            console.log('ℹ No bundled Ollama for this platform - local GGUF models available via node-llama-cpp');
+        }
     }
     
     // Initialize local LLM support
@@ -825,6 +912,16 @@ app.whenReady().then(async () => {
     initDatabase();
     console.log('Initializing DeepSearch browser...');
     await initBrowser(); // Pre-start browser for faster searches
+    
+    // Setup SearXNG handlers
+    console.log('Setting up SearXNG handlers...');
+    searxng.setupSearXNGHandlers();
+    const searxngRunning = await searxng.checkSearXNGStatus();
+    if (searxngRunning) {
+        console.log('✓ SearXNG server detected at localhost:8888');
+    } else {
+        console.log('ℹ SearXNG not running - start with: docker-compose up -d');
+    }
     
     // Check Python setup for image generation
     console.log('Checking Python setup for image generation...');

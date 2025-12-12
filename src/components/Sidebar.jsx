@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Sparkles } from 'lucide-react';
+import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Play, Square } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const Sidebar = ({
@@ -13,7 +13,6 @@ const Sidebar = ({
   hfUser,
   onOpenLoginModal,
   onHfLogout,
-  onOpenModelCreator,
   onOpenSettings
 }) => {
   const [activeMenuId, setActiveMenuId] = useState(null);
@@ -21,6 +20,8 @@ const Sidebar = ({
   const [editValue, setEditValue] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [ollamaStatus, setOllamaStatus] = useState('checking');
+  const [ollamaServerStatus, setOllamaServerStatus] = useState(null);
+  const [isStartingServer, setIsStartingServer] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const { theme, isDark } = useTheme();
 
@@ -32,9 +33,42 @@ const Sidebar = ({
     if (window.electronAPI?.onOllamaStatus) {
       window.electronAPI.onOllamaStatus((status) => {
         setOllamaStatus(status);
+        if (status === 'running') {
+          setIsStartingServer(false);
+        }
       });
     }
+    
+    // Check bundled Ollama status
+    const checkServerStatus = async () => {
+      if (window.electronAPI?.getOllamaServerStatus) {
+        const status = await window.electronAPI.getOllamaServerStatus();
+        setOllamaServerStatus(status);
+      }
+    };
+    checkServerStatus();
   }, []);
+
+  const handleStartServer = async () => {
+    if (isStartingServer) return;
+    setIsStartingServer(true);
+    try {
+      await window.electronAPI.startOllamaServer();
+    } catch (error) {
+      console.error('Failed to start Ollama server:', error);
+      setIsStartingServer(false);
+    }
+  };
+
+  const handleStopServer = async () => {
+    try {
+      await window.electronAPI.stopOllamaServer();
+      const status = await window.electronAPI.getOllamaServerStatus();
+      setOllamaServerStatus(status);
+    } catch (error) {
+      console.error('Failed to stop Ollama server:', error);
+    }
+  };
 
   const openLoginModal = () => {
     setShowUserMenu(false);
@@ -345,10 +379,60 @@ const Sidebar = ({
           width: '6px',
           height: '6px',
           borderRadius: '50%',
-          background: ollamaStatus === 'running' ? '#4caf50' : '#f44336',
-          boxShadow: ollamaStatus === 'running' ? '0 0 4px #4caf50' : 'none'
+          background: ollamaStatus === 'running' ? '#4caf50' : isStartingServer ? '#ff9800' : '#f44336',
+          boxShadow: ollamaStatus === 'running' ? '0 0 4px #4caf50' : 'none',
+          animation: isStartingServer ? 'pulse 1s infinite' : 'none'
         }} />
-        {ollamaStatus === 'running' ? 'Ollama Connected' : 'Ollama Disconnected'}
+        <span style={{ flex: 1 }}>
+          {ollamaStatus === 'running' 
+            ? 'Ollama Connected' 
+            : isStartingServer 
+              ? 'Starting...' 
+              : 'Ollama Disconnected'}
+        </span>
+        
+        {/* Start/Stop Button - only show if bundled Ollama is available */}
+        {ollamaServerStatus?.hasBundled && (
+          ollamaStatus === 'running' && ollamaServerStatus?.processRunning ? (
+            <button
+              onClick={handleStopServer}
+              title="Stop Ollama Server"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#f44336',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: '4px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(244,67,54,0.2)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Square size={14} />
+            </button>
+          ) : ollamaStatus !== 'running' && !isStartingServer && (
+            <button
+              onClick={handleStartServer}
+              title="Start Ollama Server"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#4caf50',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: '4px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(76,175,80,0.2)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Play size={14} />
+            </button>
+          )
+        )}
       </div>
 
       {/* Bottom Profile Section */}
@@ -472,31 +556,6 @@ const Sidebar = ({
                 Logout
               </button>
             )}
-            <button
-              onClick={() => {
-                onOpenModelCreator?.();
-                setShowUserMenu(false);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                width: '100%',
-                padding: '8px 12px',
-                background: 'transparent',
-                border: 'none',
-                color: theme.text,
-                cursor: 'pointer',
-                borderRadius: '4px',
-                fontSize: '0.85rem',
-                textAlign: 'left'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = theme.bgHover}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <Sparkles size={14} />
-              Model Creator
-            </button>
             <button
               onClick={() => {
                 onOpenSettings?.();

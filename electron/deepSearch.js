@@ -5,6 +5,14 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Import local SearXNG module
+let localSearxng = null;
+try {
+  localSearxng = require('./searxng');
+} catch (e) {
+  console.log('Local SearXNG module not available');
+}
+
 let puppeteer = null;
 let browserPath = null;
 let browserInstance = null; // Reuse browser instance
@@ -195,24 +203,221 @@ function getFallbackInstances() {
   ];
 }
 
-// Web search using browser-based SearXNG (most reliable, bypasses rate limiting)
+// Check if query is asking for a GitHub project's latest version
+function detectGitHubProject(query) {
+  const lowerQuery = query.toLowerCase();
+  
+  // Common patterns for version queries
+  const versionKeywords = ['latest', 'version', 'release', 'current', 'newest', 'update'];
+  const hasVersionKeyword = versionKeywords.some(kw => lowerQuery.includes(kw));
+  
+  if (!hasVersionKeyword) return null;
+  
+  // Map of known projects to their GitHub repos
+  const knownProjects = {
+    'ollama': 'ollama/ollama',
+    'node': 'nodejs/node',
+    'nodejs': 'nodejs/node',
+    'react': 'facebook/react',
+    'vue': 'vuejs/vue',
+    'angular': 'angular/angular',
+    'typescript': 'microsoft/TypeScript',
+    'vscode': 'microsoft/vscode',
+    'visual studio code': 'microsoft/vscode',
+    'python': 'python/cpython',
+    'rust': 'rust-lang/rust',
+    'go': 'golang/go',
+    'golang': 'golang/go',
+    'deno': 'denoland/deno',
+    'bun': 'oven-sh/bun',
+    'docker': 'moby/moby',
+    'kubernetes': 'kubernetes/kubernetes',
+    'k8s': 'kubernetes/kubernetes',
+    'next': 'vercel/next.js',
+    'nextjs': 'vercel/next.js',
+    'next.js': 'vercel/next.js',
+    'svelte': 'sveltejs/svelte',
+    'tailwind': 'tailwindlabs/tailwindcss',
+    'tailwindcss': 'tailwindlabs/tailwindcss',
+    'electron': 'electron/electron',
+    'flutter': 'flutter/flutter',
+    'pytorch': 'pytorch/pytorch',
+    'tensorflow': 'tensorflow/tensorflow',
+    'llama': 'meta-llama/llama',
+    'llama.cpp': 'ggerganov/llama.cpp',
+    'whisper': 'openai/whisper',
+    'stable diffusion': 'Stability-AI/stablediffusion',
+    'comfyui': 'comfyanonymous/ComfyUI',
+    'automatic1111': 'AUTOMATIC1111/stable-diffusion-webui'
+  };
+  
+  for (const [name, repo] of Object.entries(knownProjects)) {
+    if (lowerQuery.includes(name)) {
+      return repo;
+    }
+  }
+  
+  return null;
+}
+
+// Fetch latest release from GitHub API
+async function fetchGitHubRelease(repo) {
+  return new Promise((resolve) => {
+    console.log(`Fetching GitHub release for: ${repo}`);
+    
+    https.get(`https://api.github.com/repos/${repo}/releases`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/vnd.github.v3+json'
+      },
+      timeout: 5000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const releases = JSON.parse(data);
+          if (!Array.isArray(releases) || releases.length === 0) {
+            resolve(null);
+            return;
+          }
+          
+          // Find the latest stable release (not prerelease, not draft)
+          const stableRelease = releases.find(r => !r.prerelease && !r.draft);
+          // Also get the absolute latest (including prereleases)
+          const latestAny = releases[0];
+          
+          const result = {
+            stable: stableRelease ? {
+              version: stableRelease.tag_name,
+              name: stableRelease.name,
+              date: stableRelease.published_at,
+              url: stableRelease.html_url,
+              isPrerelease: false
+            } : null,
+            latest: latestAny ? {
+              version: latestAny.tag_name,
+              name: latestAny.name,
+              date: latestAny.published_at,
+              url: latestAny.html_url,
+              isPrerelease: latestAny.prerelease
+            } : null,
+            repo: repo
+          };
+          
+          console.log('GitHub release found:', result.stable?.version || result.latest?.version);
+          resolve(result);
+        } catch (e) {
+          console.error('GitHub API parse error:', e.message);
+          resolve(null);
+        }
+      });
+    }).on('error', (e) => {
+      console.error('GitHub API error:', e.message);
+      resolve(null);
+    }).on('timeout', () => {
+      console.log('GitHub API timeout');
+      resolve(null);
+    });
+  });
+}
+
+// Enhance query with current year for time-sensitive searches
+function enhanceQueryWithDate(query) {
+  const lowerQuery = query.toLowerCase();
+  const currentYear = new Date().getFullYear();
+  
+  // Keywords that indicate time-sensitive queries
+  const timeKeywords = ['latest', 'current', 'newest', 'recent', 'now', 'today', 'new'];
+  const hasTimeKeyword = timeKeywords.some(kw => lowerQuery.includes(kw));
+  
+  // Don't add year if it's already there
+  if (query.includes(String(currentYear)) || query.includes(String(currentYear - 1))) {
+    return query;
+  }
+  
+  // Add year for time-sensitive queries
+  if (hasTimeKeyword) {
+    return `${query} ${currentYear}`;
+  }
+  
+  return query;
+}
+
+// Web search using local SearXNG first, then fallback to other methods
 async function webSearch(query) {
   console.log('webSearch called with query:', query);
   
-  // Try DuckDuckGo first (more reliable results)
-  const ddgResult = await duckduckgoSearch(query);
+  // Check if this is a version query for a known GitHub project
+  const githubRepo = detectGitHubProject(query);
+  if (githubRepo) {
+    console.log(`Detected GitHub project: ${githubRepo}, fetching from GitHub API...`);
+    const releaseInfo = await fetchGitHubRelease(githubRepo);
+    if (releaseInfo && (releaseInfo.stable || releaseInfo.latest)) {
+      const release = releaseInfo.stable || releaseInfo.latest;
+      const projectName = githubRepo.split('/')[1];
+      
+      console.log(`GitHub API result: Stable=${releaseInfo.stable?.version}, Latest=${releaseInfo.latest?.version}`);
+      
+      // Format as search result
+      return {
+        success: true,
+        results: [{
+          title: `${projectName} Latest Stable Release: ${release.version}`,
+          url: release.url,
+          snippet: `The latest STABLE release of ${projectName} is ${release.version}, published on ${new Date(release.date).toLocaleDateString()}. This is verified directly from GitHub.${releaseInfo.stable && releaseInfo.latest && releaseInfo.stable.version !== releaseInfo.latest.version ? ` (Note: There is also a pre-release version ${releaseInfo.latest.version} available)` : ''}`
+        }],
+        query,
+        source: 'github-api'
+      };
+    }
+    console.log('GitHub API failed, falling back to web search');
+  }
+  
+  // Enhance query with current year for better results
+  const enhancedQuery = enhanceQueryWithDate(query);
+  console.log('Enhanced query:', enhancedQuery);
+  
+  // Try local SearXNG Docker instance first (fastest & most private)
+  if (localSearxng) {
+    try {
+      const isRunning = await localSearxng.checkSearXNGStatus();
+      if (isRunning) {
+        console.log('Using local SearXNG instance');
+        const result = await localSearxng.searchWeb(enhancedQuery);
+        if (result.success && result.results && result.results.length > 0) {
+          // Convert to standard format
+          return {
+            success: true,
+            results: result.results.map(r => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.content || ''
+            })),
+            query: enhancedQuery,
+            source: 'local-searxng'
+          };
+        }
+      }
+    } catch (e) {
+      console.log('Local SearXNG error:', e.message);
+    }
+  }
+  
+  // Try DuckDuckGo as fallback
+  const ddgResult = await duckduckgoSearch(enhancedQuery);
   if (ddgResult && ddgResult.results && ddgResult.results.length > 0) {
     return ddgResult;
   }
   
-  // Fallback to SearXNG
-  console.log('DuckDuckGo failed, trying SearXNG');
-  const browserResult = await browserSearxngSearch(query);
+  // Fallback to public SearXNG instances
+  console.log('DuckDuckGo failed, trying public SearXNG');
+  const browserResult = await browserSearxngSearch(enhancedQuery);
   if (browserResult) return browserResult;
   
   // Last resort: API search
   console.log('All browser searches failed, trying API');
-  return await apiSearch(query);
+  return await apiSearch(enhancedQuery);
 }
 
 // Search using SearXNG JSON API
@@ -839,81 +1044,27 @@ async function readFileContent(filePath, maxLines = 100) {
 
 // Tools definition for Ollama
 function getDeepSearchTools() {
-  const baseTools = [
+  return [
     {
       type: 'function',
       function: {
         name: 'web_search',
-        description: 'Search the internet for current information, news, facts, or any topic. Use this when you need up-to-date information or facts you are not certain about.',
+        description: 'Search the internet for current information, news, facts, or any topic. Use this when you need up-to-date information or facts you are not certain about. For software versions, include "latest release" or "current version" in your query.',
         parameters: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'The search query to look up on the internet'
+              description: 'The search query. For version queries, add "latest release" or "2024" to get current results. Example: "ollama latest release version 2024"'
             }
           },
           required: ['query']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'system_search',
-        description: 'Search for files on the local computer/system. Use this to find documents, images, code files, or any files the user might be referring to.',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'The filename or part of filename to search for'
-            }
-          },
-          required: ['query']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'read_file',
-        description: 'Read the content of a file found through system_search. Use this to get the actual content of a file.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'The full path to the file to read'
-            }
-          },
-          required: ['path']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'list_directory',
-        description: 'List files and folders in a directory. Use this when user asks what is on their Desktop, Documents, or any folder.',
-        parameters: {
-          type: 'object',
-          properties: {
-            directory: {
-              type: 'string',
-              description: 'The directory to list. Use "Desktop", "Documents", "Downloads" or a full path.'
-            }
-          },
-          required: ['directory']
         }
       }
     }
   ];
-  
-  return baseTools;
 }
 
-// Get Research Mode tools (subset for research)
 // Execute a tool call
 async function executeToolCall(toolName, args) {
   console.log('executeToolCall:', toolName, JSON.stringify(args));
@@ -924,13 +1075,6 @@ async function executeToolCall(toolName, args) {
       const webResult = await webSearch(args.query);
       console.log('webSearch returned:', webResult.success, 'results:', webResult.results?.length || 0);
       return webResult;
-    case 'system_search':
-      return await systemSearch(args.query);
-    case 'read_file':
-      return await readFileContent(args.path);
-    case 'list_directory':
-      console.log('Listing directory:', args.directory);
-      return await listDirectory(args.directory);
     default:
       console.log('Unknown tool:', toolName);
       return { success: false, error: `Unknown tool: ${toolName}` };

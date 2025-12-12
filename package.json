@@ -11,6 +11,7 @@
     "electron": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder",
     "setup:python": "node scripts/setup-python.js",
+    "setup:llmlingua": "node scripts/setup-llmlingua.js",
     "postinstall": "node scripts/setup-python.js"
   },
   "dependencies": {

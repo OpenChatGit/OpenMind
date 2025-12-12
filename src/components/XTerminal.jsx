@@ -218,6 +218,21 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
     return () => window.removeEventListener('resize', handleResize);
   }, [isVisible, height]);
 
+  // Refit when height changes (for popout window resizing)
+  useEffect(() => {
+    if (fitAddonRef.current && xtermRef.current && isInitializedRef.current && isVisible) {
+      const refitTimeout = setTimeout(() => {
+        try {
+          fitAddonRef.current.fit();
+          window.electronAPI?.ptyResize?.(xtermRef.current.cols, xtermRef.current.rows);
+        } catch (e) {
+          // Ignore fit errors
+        }
+      }, 50);
+      return () => clearTimeout(refitTimeout);
+    }
+  }, [height, isVisible]);
+
   // Cleanup ONLY on full unmount (component destroyed)
   useEffect(() => {
     return () => {

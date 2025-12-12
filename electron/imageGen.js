@@ -182,6 +182,7 @@ async function generateImage(params, onProgress) {
         }, 600000); // 10 min timeout for CPU generation
 
         messageCallback = (data) => {
+            console.log('Image gen callback:', data.type, data.message || data.error || '');
             if (data.type === 'progress' && onProgress) {
                 onProgress(data.message, data.progress);
             } else if (data.type === 'result') {
@@ -189,6 +190,7 @@ async function generateImage(params, onProgress) {
                 resolve(data);
             } else if (data.type === 'error') {
                 clearTimeout(timeout);
+                console.error('Image generation error:', data.error);
                 reject(new Error(data.error));
             }
         };

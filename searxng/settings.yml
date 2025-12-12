@@ -1,0 +1,25 @@
+# SearXNG settings
+
+use_default_settings: true
+
+server:
+  secret_key: "your-secret-key-change-this-in-production"
+  limiter: false
+  image_proxy: true
+  port: 8080
+  bind_address: "0.0.0.0"
+
+ui:
+  static_use_hash: true
+
+search:
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: "de-DE"
+  formats:
+    - html
+    - json
+
+# JSON Format für API-Zugriff aktivieren
+general:
+  enable_metrics: false

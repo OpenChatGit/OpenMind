@@ -215,6 +215,10 @@ function scanModelsFolder() {
           totalSize = getDirSize(fullPath);
         }
         
+        // Check if it's a deprecated .ckpt file
+        const ext = path.extname(file).toLowerCase();
+        const isDeprecated = ext === '.ckpt';
+        
         models.push({
           name: file,
           path: fullPath,
@@ -223,7 +227,9 @@ function scanModelsFolder() {
           isDirectory: stats.isDirectory(),
           modified: stats.mtime,
           type: modelType,
-          hfModelId: hfModelId
+          hfModelId: hfModelId,
+          deprecated: isDeprecated,
+          warning: isDeprecated ? 'Legacy .ckpt format - may not work. Use .safetensors instead.' : null
         });
       }
     }

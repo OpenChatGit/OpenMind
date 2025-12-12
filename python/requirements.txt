@@ -23,6 +23,9 @@ safetensors
 # GGUF model support
 stable-diffusion-cpp-python
 
+# Prompt compression (LLMLingua)
+llmlingua
+
 # ============================================================
 # GPU/CUDA SUPPORT
 # ============================================================

@@ -213,42 +213,78 @@ def load_model(model_id, local_path=None):
         
         # Check if this is a single file model (.safetensors, .ckpt)
         if is_single_file:
+            file_ext = os.path.splitext(local_path)[1].lower()
             send_progress(f"Loading single file model: {os.path.basename(local_path)}...")
+            
+            # Warn about .ckpt files - they often have compatibility issues
+            if file_ext == '.ckpt':
+                send_progress("Warning: .ckpt files may have compatibility issues. Consider using .safetensors instead.")
             
             # Try to load as single file checkpoint
             try:
-                # For SDXL single files
-                if 'xl' in local_path.lower() or 'sdxl' in local_path.lower():
+                filename_lower = os.path.basename(local_path).lower()
+                
+                # Detect model type from filename
+                is_sdxl = 'xl' in filename_lower or 'sdxl' in filename_lower
+                is_sd2 = '768' in filename_lower or 'v2' in filename_lower or '2.1' in filename_lower or '2-1' in filename_lower
+                
+                if is_sdxl:
+                    send_progress("Detected SDXL model...")
                     pipeline = StableDiffusionXLPipeline.from_single_file(
                         local_path,
                         torch_dtype=dtype,
-                        use_safetensors=local_path.endswith('.safetensors')
+                        use_safetensors=file_ext == '.safetensors'
                     )
                     loaded = True
                     send_progress("Loaded as SDXL model")
-                else:
-                    # Try SD 1.5/2.x single file
+                elif is_sd2:
+                    # SD 2.x models need special handling
+                    send_progress("Detected SD 2.x model (768px)...")
+                    from diffusers import EulerDiscreteScheduler
+                    
                     pipeline = StableDiffusionPipeline.from_single_file(
                         local_path,
                         torch_dtype=dtype,
                         safety_checker=None,
-                        use_safetensors=local_path.endswith('.safetensors')
+                        use_safetensors=file_ext == '.safetensors'
+                    )
+                    # SD 2.x works better with Euler scheduler
+                    pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config)
+                    loaded = True
+                    send_progress("Loaded as SD 2.x model (768px)")
+                else:
+                    # Try SD 1.5 single file
+                    send_progress("Loading as SD 1.5 model...")
+                    pipeline = StableDiffusionPipeline.from_single_file(
+                        local_path,
+                        torch_dtype=dtype,
+                        safety_checker=None,
+                        use_safetensors=file_ext == '.safetensors'
                     )
                     loaded = True
-                    send_progress("Loaded as SD 1.5/2.x model")
+                    send_progress("Loaded as SD 1.5 model")
             except Exception as e:
+                error_msg = str(e)
                 # If SD 1.5 failed, try SDXL as fallback
                 send_progress(f"SD 1.5 load failed, trying SDXL...")
                 try:
                     pipeline = StableDiffusionXLPipeline.from_single_file(
                         local_path,
                         torch_dtype=dtype,
-                        use_safetensors=local_path.endswith('.safetensors')
+                        use_safetensors=file_ext == '.safetensors'
                     )
                     loaded = True
                     send_progress("Loaded as SDXL model (fallback)")
                 except Exception as e2:
-                    send_progress(f"Single file load failed: {str(e)[:80]}")
+                    # Provide helpful error message for .ckpt files
+                    if file_ext == '.ckpt':
+                        raise Exception(
+                            f"Cannot load .ckpt file. This format is deprecated. "
+                            f"Please download the .safetensors version instead, or use SDXL-Turbo from HuggingFace. "
+                            f"Original error: {error_msg[:100]}"
+                        )
+                    else:
+                        send_progress(f"Single file load failed: {error_msg[:80]}")
         
         # For directories or HuggingFace models (NOT single files!)
         if not loaded and not is_single_file:

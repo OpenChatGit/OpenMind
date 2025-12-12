@@ -39,6 +39,10 @@ config.local.json
 
 # Large model files
 models/
+temp_check
+models
+ollama
+ollama/
 *.gguf
 *.bin
 *.safetensors

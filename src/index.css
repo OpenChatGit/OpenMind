@@ -144,3 +144,64 @@ body {
 .hljs-builtin-name {
   color: #8be9fd !important;
 }
+
+/* ============================================
+   Light Mode Syntax Highlighting
+   ============================================ */
+[data-theme="light"] .hljs {
+  background: #f6f8fa !important;
+  color: #24292e !important;
+}
+
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-link {
+  color: #d73a49 !important;
+}
+
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-title,
+[data-theme="light"] .hljs-name,
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-attribute,
+[data-theme="light"] .hljs-symbol,
+[data-theme="light"] .hljs-bullet,
+[data-theme="light"] .hljs-addition,
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-tag,
+[data-theme="light"] .hljs-template-variable {
+  color: #22863a !important;
+}
+
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-quote,
+[data-theme="light"] .hljs-deletion,
+[data-theme="light"] .hljs-meta {
+  color: #6a737d !important;
+}
+
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-regexp,
+[data-theme="light"] .hljs-selector-id,
+[data-theme="light"] .hljs-selector-class,
+[data-theme="light"] .hljs-selector-attr,
+[data-theme="light"] .hljs-selector-pseudo {
+  color: #005cc5 !important;
+}
+
+[data-theme="light"] .hljs-function,
+[data-theme="light"] .hljs-built_in,
+[data-theme="light"] .hljs-builtin-name {
+  color: #6f42c1 !important;
+}
+
+/* Light mode scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
