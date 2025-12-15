@@ -4,17 +4,19 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer
 } from 'recharts';
+import { useTheme } from '../contexts/ThemeContext';
 
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00C49F', '#FFBB28', '#FF8042'];
 
 const ChartRenderer = ({ config }) => {
   const [error, setError] = useState(null);
+  const { theme } = useTheme();
 
   try {
     const { type, data, options = {} } = typeof config === 'string' ? JSON.parse(config) : config;
     
     if (!data || !Array.isArray(data)) {
-      return <div style={{ color: '#ff6b6b', padding: '1rem' }}>Invalid chart data</div>;
+      return <div style={{ color: theme.error, padding: '1rem' }}>Invalid chart data</div>;
     }
 
     const chartStyle = {
@@ -122,7 +124,7 @@ const ChartRenderer = ({ config }) => {
     );
   } catch (e) {
     return (
-      <div style={{ color: '#ff6b6b', padding: '1rem', background: 'rgba(255,107,107,0.1)', borderRadius: '8px' }}>
+      <div style={{ color: theme.error, padding: '1rem', background: theme.errorBg, borderRadius: '8px' }}>
         Error parsing chart: {e.message}
       </div>
     );

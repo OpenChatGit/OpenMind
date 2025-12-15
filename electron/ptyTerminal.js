@@ -129,7 +129,22 @@ function resizePty(cols, rows) {
 // Kill PTY process
 function killPty() {
     if (ptyProcess) {
-        ptyProcess.kill();
+        try {
+            // On Windows, we need to kill the process tree
+            if (process.platform === 'win32') {
+                const pid = ptyProcess.pid;
+                // Kill the process tree using taskkill
+                require('child_process').exec(`taskkill /pid ${pid} /T /F`, (err) => {
+                    if (err) {
+                        console.log('taskkill error (may be already dead):', err.message);
+                    }
+                });
+            }
+            // Also call the normal kill
+            ptyProcess.kill();
+        } catch (e) {
+            console.log('Error killing PTY:', e.message);
+        }
         ptyProcess = null;
         return true;
     }

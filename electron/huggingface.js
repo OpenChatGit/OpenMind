@@ -4,6 +4,9 @@ const path = require('path');
 
 let apiToken = null;
 
+// Cache for author avatars to avoid repeated requests
+const avatarCache = new Map();
+
 function setApiToken(token) {
   apiToken = token;
   // Save token to config file
@@ -41,9 +44,114 @@ function clearApiToken() {
   return { success: true };
 }
 
-function searchModels(query = '', limit = 20) {
+// Fetch avatar URL for an author/organization from HuggingFace
+function fetchAuthorAvatar(author) {
   return new Promise((resolve) => {
-    const url = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&limit=${limit}&filter=pytorch`;
+    // Check cache first
+    if (avatarCache.has(author)) {
+      resolve(avatarCache.get(author));
+      return;
+    }
+
+    // Fetch the author's page and extract avatar URL
+    const url = `https://huggingface.co/${author}`;
+    
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        // Look for avatar URL pattern: cdn-avatars.huggingface.co/...
+        // The URL might be in JSON with &quot; entities or regular quotes
+        // Match until we hit a quote, &quot;, whitespace, or end of URL
+        const match = data.match(/https:\/\/cdn-avatars\.huggingface\.co\/v1\/production\/uploads\/[a-zA-Z0-9\/_-]+\.[a-zA-Z]+/);
+        if (match) {
+          // Found avatar URL, now fetch it as base64 to bypass CORS
+          fetchImageAsBase64(match[0]).then(base64 => {
+            avatarCache.set(author, base64);
+            resolve(base64);
+          }).catch(() => {
+            avatarCache.set(author, null);
+            resolve(null);
+          });
+        } else {
+          avatarCache.set(author, null);
+          resolve(null);
+        }
+      });
+    }).on('error', () => {
+      avatarCache.set(author, null);
+      resolve(null);
+    });
+  });
+}
+
+// Fetch image and convert to base64 data URL
+function fetchImageAsBase64(imageUrl) {
+  return new Promise((resolve, reject) => {
+    https.get(imageUrl, (res) => {
+      // Handle redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        fetchImageAsBase64(res.headers.location).then(resolve).catch(reject);
+        return;
+      }
+      
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+      
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        // Get content type from header or infer from URL extension
+        let contentType = res.headers['content-type'];
+        if (!contentType || contentType.includes('octet-stream')) {
+          // Infer from URL extension
+          const ext = imageUrl.split('.').pop()?.toLowerCase();
+          const mimeTypes = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'webp': 'image/webp',
+            'svg': 'image/svg+xml',
+            'ico': 'image/x-icon',
+            'bmp': 'image/bmp'
+          };
+          contentType = mimeTypes[ext] || 'image/png';
+        }
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
+        resolve(base64);
+      });
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+// Fetch avatars for multiple authors in parallel
+async function fetchAvatarsForModels(models) {
+  const uniqueAuthors = [...new Set(models.map(m => m.author))];
+  
+  // Fetch all avatars in parallel (with timeout to not block too long)
+  await Promise.all(uniqueAuthors.map(author => 
+    Promise.race([
+      fetchAuthorAvatar(author),
+      new Promise(resolve => setTimeout(() => resolve(null), 3000)) // 3s timeout
+    ])
+  ));
+  
+  // Apply cached avatars to models
+  return models.map(m => ({
+    ...m,
+    avatarUrl: avatarCache.get(m.author) || null
+  }));
+}
+
+async function searchModels(query = '', limit = 20) {
+  return new Promise((resolve) => {
+    // Search for GGUF models - sort by downloads for popular models
+    const url = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&limit=${limit}&sort=downloads&direction=-1`;
     
     const options = {
       headers: apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {}
@@ -52,21 +160,47 @@ function searchModels(query = '', limit = 20) {
     https.get(url, options, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
+      res.on('end', async () => {
         try {
-          const models = JSON.parse(data);
-          const formatted = models.map(m => ({
-            id: m.id || m.modelId,
-            name: m.id || m.modelId,
-            downloads: m.downloads || 0,
-            likes: m.likes || 0,
-            tags: m.tags || [],
-            pipeline_tag: m.pipeline_tag,
-            library_name: m.library_name
-          }));
-          resolve({ success: true, models: formatted });
+          const parsed = JSON.parse(data);
+          
+          // Handle various response formats
+          let models = [];
+          if (Array.isArray(parsed)) {
+            models = parsed;
+          } else if (parsed.models && Array.isArray(parsed.models)) {
+            models = parsed.models;
+          } else if (parsed.value && Array.isArray(parsed.value)) {
+            models = parsed.value;
+          } else if (parsed.error) {
+            console.error('HF API error:', parsed.error);
+            resolve({ success: false, error: parsed.error, models: [] });
+            return;
+          }
+          
+          // Format models with basic info
+          const formatted = models.map(m => {
+            const modelId = m.id || m.modelId;
+            const author = modelId.split('/')[0];
+            return {
+              id: modelId,
+              name: modelId,
+              author: author,
+              avatarUrl: null, // Will be filled by fetchAvatarsForModels
+              downloads: m.downloads || 0,
+              likes: m.likes || 0,
+              tags: m.tags || [],
+              pipeline_tag: m.pipeline_tag,
+              library_name: m.library_name
+            };
+          });
+          
+          // Fetch avatars for all unique authors
+          const modelsWithAvatars = await fetchAvatarsForModels(formatted);
+          resolve({ success: true, models: modelsWithAvatars });
         } catch (error) {
           console.error('Error parsing models:', error);
+          console.error('Raw data:', data.slice(0, 1000));
           resolve({ success: false, error: error.message, models: [] });
         }
       });
@@ -516,6 +650,226 @@ function formatModelSize(bytes) {
   return `${mb.toFixed(0)}MB`;
 }
 
+// Remove YAML front matter from README (the --- ... --- block at the start)
+function stripYamlFrontMatter(content) {
+  if (!content) return '';
+  // Check if starts with ---
+  let result = content.trimStart();
+  if (result.startsWith('---')) {
+    // Find the closing ---
+    const endIndex = result.indexOf('---', 3);
+    if (endIndex !== -1) {
+      // Return everything after the closing --- and newline
+      result = result.slice(endIndex + 3).trimStart();
+    }
+  }
+  
+  // Remove HTML comments (<!-- ... -->)
+  result = result.replace(/<!--[\s\S]*?-->/g, '');
+  
+  return result.trimStart();
+}
+
+// Fetch model README/Model Card from HuggingFace
+function fetchModelReadme(modelId) {
+  return new Promise((resolve) => {
+    const url = `https://huggingface.co/${modelId}/raw/main/README.md`;
+    
+    const options = {
+      headers: apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {}
+    };
+
+    https.get(url, options, (res) => {
+      // Handle redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        https.get(res.headers.location, options, (res2) => {
+          let data = '';
+          res2.on('data', (chunk) => data += chunk);
+          res2.on('end', () => resolve(res2.statusCode === 200 ? stripYamlFrontMatter(data) : ''));
+        }).on('error', () => resolve(''));
+        return;
+      }
+      
+      if (res.statusCode !== 200) {
+        resolve('');
+        return;
+      }
+      
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => resolve(stripYamlFrontMatter(data)));
+    }).on('error', () => resolve(''));
+  });
+}
+
+// Get detailed model info from HuggingFace
+function getModelInfo(modelId) {
+  return new Promise((resolve) => {
+    const url = `https://huggingface.co/api/models/${modelId}`;
+    
+    const options = {
+      headers: apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {}
+    };
+
+    https.get(url, options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', async () => {
+        try {
+          const model = JSON.parse(data);
+          
+          // Get author avatar and README in parallel
+          const author = modelId.split('/')[0];
+          const [avatarUrl, readme] = await Promise.all([
+            avatarCache.get(author) || fetchAuthorAvatar(author),
+            fetchModelReadme(modelId)
+          ]);
+          
+          // Extract GGUF files from siblings
+          const ggufFiles = (model.siblings || [])
+            .filter(f => f.rfilename?.endsWith('.gguf'))
+            .map(f => ({
+              name: f.rfilename,
+              size: f.size || 0,
+              sizeFormatted: formatModelSize(f.size || 0)
+            }));
+          
+          const result = {
+            id: model.id || model.modelId,
+            author: model.author || author,
+            avatarUrl: avatarUrl,
+            downloads: model.downloads || 0,
+            likes: model.likes || 0,
+            tags: model.tags || [],
+            pipeline_tag: model.pipeline_tag,
+            library_name: model.library_name,
+            lastModified: model.lastModified,
+            createdAt: model.createdAt,
+            description: model.cardData?.description || '',
+            license: model.cardData?.license || model.tags?.find(t => t.startsWith('license:'))?.replace('license:', '') || '',
+            ggufFiles: ggufFiles,
+            modelSize: model.safetensors?.total ? formatModelSize(model.safetensors.total) : '',
+            readme: readme || '',
+            // GGUF specific info
+            gguf: model.gguf ? {
+              contextLength: model.gguf.context_length,
+              architecture: model.gguf.architecture,
+              totalSize: formatModelSize(model.gguf.total || 0)
+            } : null
+          };
+          
+          resolve({ success: true, model: result });
+        } catch (error) {
+          console.error('Error parsing model info:', error);
+          resolve({ success: false, error: error.message });
+        }
+      });
+    }).on('error', (error) => {
+      console.error('Error fetching model info:', error);
+      resolve({ success: false, error: error.message });
+    });
+  });
+}
+
+// Download a GGUF file from HuggingFace
+// onProgress callback receives { percent, downloaded, total, speed }
+function downloadGGUF(modelId, filename, onProgress) {
+  return new Promise((resolve, reject) => {
+    const modelsDir = path.join(__dirname, '..', 'models');
+    if (!fs.existsSync(modelsDir)) {
+      fs.mkdirSync(modelsDir, { recursive: true });
+    }
+
+    const localFilename = `${modelId.replace('/', '_')}_${filename}`;
+    const filePath = path.join(modelsDir, localFilename);
+    
+    // Check if file already exists
+    if (fs.existsSync(filePath)) {
+      resolve({
+        success: true,
+        path: filePath,
+        filename: localFilename,
+        message: 'File already exists'
+      });
+      return;
+    }
+
+    // HuggingFace download URL
+    const url = `https://huggingface.co/${modelId}/resolve/main/${filename}`;
+    console.log('Downloading GGUF:', url);
+
+    const options = {
+      headers: apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {}
+    };
+
+    const file = fs.createWriteStream(filePath);
+    let downloadedBytes = 0;
+    let totalBytes = 0;
+    let startTime = Date.now();
+
+    const makeRequest = (requestUrl) => {
+      https.get(requestUrl, options, (res) => {
+        // Handle redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          makeRequest(res.headers.location);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          file.close();
+          fs.unlinkSync(filePath);
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+
+        totalBytes = parseInt(res.headers['content-length'], 10) || 0;
+
+        res.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          file.write(chunk);
+
+          if (onProgress && totalBytes > 0) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = downloadedBytes / elapsed;
+            onProgress({
+              percent: Math.round((downloadedBytes / totalBytes) * 100),
+              downloaded: downloadedBytes,
+              total: totalBytes,
+              speed: speed,
+              speedFormatted: formatModelSize(speed) + '/s',
+              downloadedFormatted: formatModelSize(downloadedBytes),
+              totalFormatted: formatModelSize(totalBytes)
+            });
+          }
+        });
+
+        res.on('end', () => {
+          file.end();
+          console.log('Download complete:', filePath);
+          resolve({
+            success: true,
+            path: filePath,
+            filename: localFilename,
+            message: 'Download complete'
+          });
+        });
+
+        res.on('error', (err) => {
+          file.close();
+          fs.unlinkSync(filePath);
+          reject(err);
+        });
+      }).on('error', (err) => {
+        file.close();
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        reject(err);
+      });
+    };
+
+    makeRequest(url);
+  });
+}
+
 // Load token on startup
 loadApiToken();
 
@@ -528,5 +882,7 @@ module.exports = {
   getUserInfo,
   sendInferenceMessage,
   getInferenceModels,
-  searchInferenceModels
+  searchInferenceModels,
+  getModelInfo,
+  downloadGGUF
 };

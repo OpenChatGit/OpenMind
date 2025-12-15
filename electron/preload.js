@@ -40,8 +40,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadLocalModel: (modelPath) => ipcRenderer.invoke('load-local-model', modelPath),
     unloadLocalModel: () => ipcRenderer.invoke('unload-local-model'),
     getLocalLlmStatus: () => ipcRenderer.invoke('get-local-llm-status'),
-    sendLocalMessage: (messages) => ipcRenderer.invoke('send-local-message', { messages }),
+    sendLocalMessage: (messages, modelName) => ipcRenderer.invoke('send-local-message', { messages, modelName }),
     onLocalModelProgress: (callback) => ipcRenderer.on('local-model-progress', (event, data) => callback(data)),
+    
+    // OpenMind Model API (Custom GGUF model configurations)
+    openmindListModels: () => ipcRenderer.invoke('openmind-list-models'),
+    openmindGetModel: (name) => ipcRenderer.invoke('openmind-get-model', name),
+    openmindCreateModel: (config) => ipcRenderer.invoke('openmind-create-model', config),
+    openmindUpdateModel: (name, updates) => ipcRenderer.invoke('openmind-update-model', { name, updates }),
+    openmindDeleteModel: (name) => ipcRenderer.invoke('openmind-delete-model', name),
+    openmindScanGGUF: () => ipcRenderer.invoke('openmind-scan-gguf'),
+    openmindImportModel: (sourcePath) => ipcRenderer.invoke('openmind-import-model', sourcePath),
+    openmindGetPresets: () => ipcRenderer.invoke('openmind-get-presets'),
+    openmindGetTemplates: () => ipcRenderer.invoke('openmind-get-templates'),
+    openmindParseGGUF: (filePath) => ipcRenderer.invoke('openmind-parse-gguf', filePath),
+    openmindLoadModel: (modelName) => ipcRenderer.invoke('openmind-load-model', modelName),
+    openmindSelectGGUF: () => ipcRenderer.invoke('openmind-select-gguf'),
+    onOpenmindCreateProgress: (callback) => ipcRenderer.on('openmind-create-progress', (event, data) => callback(data)),
+    onOpenmindImportProgress: (callback) => ipcRenderer.on('openmind-import-progress', (event, data) => callback(data)),
     
     // Image/File Selection API
     selectImages: () => ipcRenderer.invoke('select-images'),
@@ -53,6 +69,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     checkImageGenStatus: () => ipcRenderer.invoke('check-image-gen-status'),
     checkPythonSetup: () => ipcRenderer.invoke('check-python-setup'),
     onImageGenProgress: (callback) => ipcRenderer.on('image-gen-progress', (event, data) => callback(data)),
+    
+    // Docker API
+    checkDockerStatus: () => ipcRenderer.invoke('check-docker-status'),
+    getDockerContainers: () => ipcRenderer.invoke('get-docker-containers'),
     
     // Chat Persistence API
     loadChats: () => ipcRenderer.invoke('load-chats'),
@@ -70,9 +90,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hfLoadToken: () => ipcRenderer.invoke('hf-load-token'),
     hfClearToken: () => ipcRenderer.invoke('hf-clear-token'),
     hfSearchModels: (query) => ipcRenderer.invoke('hf-search-models', query),
+    hfGetModelInfo: (modelId) => ipcRenderer.invoke('hf-get-model-info', modelId),
     hfDownloadModel: (modelId) => ipcRenderer.invoke('hf-download-model', modelId),
+    hfDownloadGGUF: (modelId, filename) => ipcRenderer.invoke('hf-download-gguf', modelId, filename),
     hfGetUserInfo: () => ipcRenderer.invoke('hf-get-user-info'),
     onHfDownloadProgress: (callback) => ipcRenderer.on('hf-download-progress', (event, data) => callback(data)),
+    onHfGGUFDownloadProgress: (callback) => ipcRenderer.on('hf-gguf-download-progress', (event, data) => callback(data)),
     
     
     // External Links
@@ -108,5 +131,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // SearXNG Web Search API
     searxngSearch: (query, options) => ipcRenderer.invoke('searxng:search', query, options),
     searxngStatus: () => ipcRenderer.invoke('searxng:status'),
-    searxngCategories: () => ipcRenderer.invoke('searxng:categories')
+    searxngCategories: () => ipcRenderer.invoke('searxng:categories'),
+    
+    // Auth API (Local account system)
+    authRegister: (email, password, name) => ipcRenderer.invoke('auth-register', { email, password, name }),
+    authLogin: (email, password) => ipcRenderer.invoke('auth-login', { email, password }),
+    authLogout: () => ipcRenderer.invoke('auth-logout'),
+    authGetCurrentUser: () => ipcRenderer.invoke('auth-get-current-user'),
+    authUpdateProfile: (updates) => ipcRenderer.invoke('auth-update-profile', updates),
+    authConnectHuggingFace: (token, username) => ipcRenderer.invoke('auth-connect-huggingface', { token, username }),
+    authDisconnectHuggingFace: () => ipcRenderer.invoke('auth-disconnect-huggingface'),
+    authChangePassword: (currentPassword, newPassword) => ipcRenderer.invoke('auth-change-password', { currentPassword, newPassword }),
+    
+    // Secure Token Storage (for API keys, HF tokens, etc.)
+    authStoreToken: (key, value) => ipcRenderer.invoke('auth-store-token', { key, value }),
+    authGetToken: (key) => ipcRenderer.invoke('auth-get-token', key),
+    authDeleteToken: (key) => ipcRenderer.invoke('auth-delete-token', key),
+    
+    // Training API (OpenMind Train)
+    trainingCheckOrgMembership: (hfToken) => ipcRenderer.invoke('training-check-org-membership', hfToken),
+    trainingGetBaseModels: () => ipcRenderer.invoke('training-get-base-models'),
+    trainingGetPresets: () => ipcRenderer.invoke('training-get-presets'),
+    trainingValidateData: (data, format) => ipcRenderer.invoke('training-validate-data', { data, format }),
+    trainingGetSubscriptionTiers: () => ipcRenderer.invoke('training-get-subscription-tiers'),
+    trainingStart: (config, hfToken) => ipcRenderer.invoke('training-start', { config, hfToken }),
+    trainingCheckStatus: (jobId, hfToken) => ipcRenderer.invoke('training-check-status', { jobId, hfToken }),
 });

@@ -3,13 +3,36 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
+// Custom scrollbar styles for terminal
+const terminalStyles = `
+  .xterm-viewport::-webkit-scrollbar {
+    width: 8px;
+    background: transparent;
+  }
+  .xterm-viewport::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .xterm-viewport::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+  }
+  .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+  .xterm-screen {
+    padding: 4px 0;
+  }
+`;
+
 // Persistent terminal component - stays alive when hidden
+// PTY is managed globally to survive component remounts
+let globalPtyCreated = false;
+
 const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) => {
   const terminalRef = useRef(null);
   const xtermRef = useRef(null);
   const fitAddonRef = useRef(null);
   const isInitializedRef = useRef(false);
-  const ptyCreatedRef = useRef(false);
   const waitingForRestartRef = useRef(false);
   const hasBeenVisibleRef = useRef(false);
 
@@ -19,7 +42,7 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
     isInitialized: () => isInitializedRef.current,
     killPty: () => {
       window.electronAPI?.ptyKill?.();
-      ptyCreatedRef.current = false;
+      globalPtyCreated = false;
       waitingForRestartRef.current = true;
     }
   }));
@@ -34,25 +57,65 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
     const initTimeout = setTimeout(async () => {
       if (!terminalRef.current || isInitializedRef.current) return;
       
-      // Create xterm instance
+      // Create xterm instance with modern theme
       const term = new Terminal({
         cursorBlink: true,
         cursorStyle: 'bar',
         fontSize: 13,
-        fontFamily: '"Cascadia Code", "Fira Code", Consolas, monospace',
+        fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace',
+        lineHeight: 1.2,
+        letterSpacing: 0,
         theme: isDark ? {
-          background: '#1e1e1e',
-          foreground: '#e0e0e0',
+          background: '#0d0d0d',
+          foreground: '#e4e4e4',
           cursor: '#ffffff',
-          selectionBackground: 'rgba(255, 255, 255, 0.3)',
+          cursorAccent: '#0d0d0d',
+          selectionBackground: 'rgba(255, 255, 255, 0.25)',
+          selectionForeground: '#ffffff',
+          // ANSI Colors - Modern palette
+          black: '#1d1f21',
+          red: '#f87171',
+          green: '#4ade80',
+          yellow: '#fbbf24',
+          blue: '#60a5fa',
+          magenta: '#c084fc',
+          cyan: '#22d3ee',
+          white: '#e4e4e4',
+          brightBlack: '#5c5c5c',
+          brightRed: '#fca5a5',
+          brightGreen: '#86efac',
+          brightYellow: '#fde047',
+          brightBlue: '#93c5fd',
+          brightMagenta: '#d8b4fe',
+          brightCyan: '#67e8f9',
+          brightWhite: '#ffffff',
         } : {
-          background: '#f5f5f5',
+          background: '#fafafa',
           foreground: '#1a1a1a',
           cursor: '#1a1a1a',
-          selectionBackground: 'rgba(0, 0, 0, 0.2)',
+          cursorAccent: '#fafafa',
+          selectionBackground: 'rgba(0, 0, 0, 0.15)',
+          selectionForeground: '#000000',
+          // ANSI Colors - Light theme
+          black: '#1a1a1a',
+          red: '#dc2626',
+          green: '#16a34a',
+          yellow: '#ca8a04',
+          blue: '#2563eb',
+          magenta: '#9333ea',
+          cyan: '#0891b2',
+          white: '#f5f5f5',
+          brightBlack: '#737373',
+          brightRed: '#ef4444',
+          brightGreen: '#22c55e',
+          brightYellow: '#eab308',
+          brightBlue: '#3b82f6',
+          brightMagenta: '#a855f7',
+          brightCyan: '#06b6d4',
+          brightWhite: '#ffffff',
         },
         allowProposedApi: true,
-        scrollback: 5000,
+        scrollback: 1000,
         convertEol: true
       });
 
@@ -70,20 +133,25 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
       setTimeout(() => {
         try {
           fitAddon.fit();
+          // Scroll to bottom to ensure cursor is visible at the top of a fresh terminal
+          term.scrollToBottom();
         } catch (e) {
           console.log('Initial fit error:', e);
         }
       }, 50);
 
-      // Create PTY process
-      if (!ptyCreatedRef.current && window.electronAPI?.ptyCreate) {
+      // Create PTY process (only if not already created globally)
+      if (!globalPtyCreated && window.electronAPI?.ptyCreate) {
+        // Clear terminal before starting PTY to ensure clean state
+        term.clear();
+        
         const result = await window.electronAPI.ptyCreate({
           cols: term.cols || 80,
           rows: term.rows || 10
         });
         
         if (result.success) {
-          ptyCreatedRef.current = true;
+          globalPtyCreated = true;
         } else {
           term.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`);
         }
@@ -91,7 +159,7 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
 
       // Function to restart PTY
       const restartPty = async () => {
-        if (ptyCreatedRef.current) return;
+        if (globalPtyCreated) return;
         
         waitingForRestartRef.current = false;
         xtermRef.current?.writeln('\x1b[32mRestarting terminal...\x1b[0m\r\n');
@@ -102,7 +170,7 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
         });
         
         if (result?.success) {
-          ptyCreatedRef.current = true;
+          globalPtyCreated = true;
         } else {
           xtermRef.current?.writeln(`\x1b[31mFailed to restart: ${result?.error}\x1b[0m`);
           waitingForRestartRef.current = true;
@@ -118,7 +186,7 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
         }
         
         // Normal input - send to PTY
-        if (ptyCreatedRef.current) {
+        if (globalPtyCreated) {
           window.electronAPI?.ptyWrite?.(data);
         }
       });
@@ -133,7 +201,7 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
       // Handle PTY exit - offer to restart
       if (window.electronAPI?.onPtyExit) {
         window.electronAPI.onPtyExit(({ exitCode }) => {
-          ptyCreatedRef.current = false;
+          globalPtyCreated = false;
           waitingForRestartRef.current = true;
           xtermRef.current?.writeln(`\r\n\x1b[33mProcess exited (${exitCode}). Press Enter to restart...\x1b[0m`);
         });
@@ -154,15 +222,51 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
   useEffect(() => {
     if (xtermRef.current) {
       xtermRef.current.options.theme = isDark ? {
-        background: '#1e1e1e',
-        foreground: '#e0e0e0',
+        background: '#0d0d0d',
+        foreground: '#e4e4e4',
         cursor: '#ffffff',
-        selectionBackground: 'rgba(255, 255, 255, 0.3)',
+        cursorAccent: '#0d0d0d',
+        selectionBackground: 'rgba(255, 255, 255, 0.25)',
+        selectionForeground: '#ffffff',
+        black: '#1d1f21',
+        red: '#f87171',
+        green: '#4ade80',
+        yellow: '#fbbf24',
+        blue: '#60a5fa',
+        magenta: '#c084fc',
+        cyan: '#22d3ee',
+        white: '#e4e4e4',
+        brightBlack: '#5c5c5c',
+        brightRed: '#fca5a5',
+        brightGreen: '#86efac',
+        brightYellow: '#fde047',
+        brightBlue: '#93c5fd',
+        brightMagenta: '#d8b4fe',
+        brightCyan: '#67e8f9',
+        brightWhite: '#ffffff',
       } : {
-        background: '#f5f5f5',
+        background: '#fafafa',
         foreground: '#1a1a1a',
         cursor: '#1a1a1a',
-        selectionBackground: 'rgba(0, 0, 0, 0.2)',
+        cursorAccent: '#fafafa',
+        selectionBackground: 'rgba(0, 0, 0, 0.15)',
+        selectionForeground: '#000000',
+        black: '#1a1a1a',
+        red: '#dc2626',
+        green: '#16a34a',
+        yellow: '#ca8a04',
+        blue: '#2563eb',
+        magenta: '#9333ea',
+        cyan: '#0891b2',
+        white: '#f5f5f5',
+        brightBlack: '#737373',
+        brightRed: '#ef4444',
+        brightGreen: '#22c55e',
+        brightYellow: '#eab308',
+        brightBlue: '#3b82f6',
+        brightMagenta: '#a855f7',
+        brightCyan: '#06b6d4',
+        brightWhite: '#ffffff',
       };
     }
   }, [isDark]);
@@ -233,20 +337,29 @@ const XTerminal = forwardRef(({ isDark, height = 150, isVisible = true }, ref) =
     }
   }, [height, isVisible]);
 
-  // Cleanup ONLY on full unmount (component destroyed)
+  // Inject custom scrollbar styles
+  useEffect(() => {
+    const styleId = 'xterm-custom-styles';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = terminalStyles;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  // Cleanup terminal UI on unmount (but keep PTY alive for other instances)
   useEffect(() => {
     return () => {
-      // Only cleanup when component is truly unmounting
-      window.electronAPI?.removePtyListeners?.();
-      window.electronAPI?.ptyKill?.();
-      
+      // Only dispose the xterm UI, don't kill PTY or remove listeners
+      // Listeners will be re-registered by the next terminal instance
       if (xtermRef.current) {
         xtermRef.current.dispose();
         xtermRef.current = null;
       }
       fitAddonRef.current = null;
       isInitializedRef.current = false;
-      ptyCreatedRef.current = false;
+      // Note: Don't reset globalPtyCreated or remove listeners - PTY stays alive
     };
   }, []);
 

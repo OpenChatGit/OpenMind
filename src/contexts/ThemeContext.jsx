@@ -185,16 +185,42 @@ export const ThemeProvider = ({ children }) => {
     return saved !== null ? parseFloat(saved) : 0.5;
   });
 
+  // Accessibility settings
+  const [highContrast, setHighContrast] = useState(() => {
+    return localStorage.getItem('high-contrast') === 'true';
+  });
+
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    return localStorage.getItem('reduced-motion') === 'true';
+  });
+
+  const [fontSize, setFontSize] = useState(() => {
+    return localStorage.getItem('font-size') || 'medium';
+  });
+
   // Ripple animation state
   const [ripple, setRipple] = useState(null);
 
-  // Merge theme with colorblind colors
+  // Merge theme with colorblind colors and high contrast adjustments
   const theme = useMemo(() => {
     const baseTheme = themes[themeName] || themes.dark;
     const cbColors = colorblindModes[colorblindMode]?.colors || colorblindModes.none.colors;
+    const isDark = themeName === 'dark';
+    
+    // High contrast adjustments
+    const hcAdjustments = highContrast ? {
+      border: isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)',
+      borderLight: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+      text: isDark ? '#ffffff' : '#000000',
+      textSecondary: isDark ? '#c0c0c0' : '#404040',
+      textMuted: isDark ? '#a0a0a0' : '#606060',
+      bgHover: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.1)',
+      bgActive: isDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.15)',
+    } : {};
     
     return {
       ...baseTheme,
+      ...hcAdjustments,
       // Override semantic colors with colorblind-friendly versions
       error: cbColors.error,
       success: cbColors.success,
@@ -204,7 +230,7 @@ export const ThemeProvider = ({ children }) => {
       successBg: cbColors.successBg,
       warningBg: cbColors.warningBg,
     };
-  }, [themeName, colorblindMode]);
+  }, [themeName, colorblindMode, highContrast]);
 
   useEffect(() => {
     localStorage.setItem('app-theme', themeName);
@@ -252,6 +278,43 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     localStorage.setItem('retro-audio-volume', retroAudioVolume.toString());
   }, [retroAudioVolume]);
+
+  // High Contrast effect
+  useEffect(() => {
+    localStorage.setItem('high-contrast', highContrast.toString());
+    document.documentElement.setAttribute('data-high-contrast', highContrast.toString());
+  }, [highContrast]);
+
+  // Reduced Motion effect - also disables animations
+  useEffect(() => {
+    localStorage.setItem('reduced-motion', reducedMotion.toString());
+    document.documentElement.setAttribute('data-reduced-motion', reducedMotion.toString());
+    if (reducedMotion) {
+      // Add CSS to disable all animations
+      const style = document.getElementById('reduced-motion-styles') || document.createElement('style');
+      style.id = 'reduced-motion-styles';
+      style.textContent = `
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+      `;
+      if (!document.getElementById('reduced-motion-styles')) {
+        document.head.appendChild(style);
+      }
+    } else {
+      const style = document.getElementById('reduced-motion-styles');
+      if (style) style.remove();
+    }
+  }, [reducedMotion]);
+
+  // Font Size effect
+  useEffect(() => {
+    localStorage.setItem('font-size', fontSize);
+    const sizes = { small: '14px', medium: '16px', large: '18px', 'extra-large': '20px' };
+    document.documentElement.style.fontSize = sizes[fontSize] || '16px';
+  }, [fontSize]);
 
   const toggleTheme = useCallback(() => {
     setThemeName(prev => prev === 'dark' ? 'light' : 'dark');
@@ -334,8 +397,15 @@ export const ThemeProvider = ({ children }) => {
     setRetroAudioEnabled,
     retroAudioVolume,
     setRetroAudioVolume,
+    // Accessibility
+    highContrast,
+    setHighContrast,
+    reducedMotion,
+    setReducedMotion,
+    fontSize,
+    setFontSize,
     ripple
-  }), [theme, themeName, colorblindMode, toggleTheme, toggleThemeWithRipple, showAnimations, animationType, retroAudioEnabled, retroAudioVolume, ripple]);
+  }), [theme, themeName, colorblindMode, toggleTheme, toggleThemeWithRipple, showAnimations, animationType, retroAudioEnabled, retroAudioVolume, highContrast, reducedMotion, fontSize, ripple]);
 
   return (
     <ThemeContext.Provider value={value}>

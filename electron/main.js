@@ -2,16 +2,114 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { exec } = require('child_process');
+
+// CRITICAL: Only load essential modules synchronously
 const { initDatabase, loadChats, saveChats, saveChat, deleteChat } = require('./database');
-const { scanModelsFolder, scanDiffusionModels, getModelInfo } = require('./modelScanner');
-const { setApiToken, loadApiToken, clearApiToken, searchModels, downloadModel, getUserInfo, sendInferenceMessage, getInferenceModels, searchInferenceModels } = require('./huggingface');
-const { initBrowser, closeBrowser, getDeepSearchTools, executeToolCall } = require('./deepSearch');
-const imageGen = require('./imageGen');
-const ollama = require('./ollama');
-const ollamaManager = require('./ollamaManager');
-const localLlama = require('./localLlama');
-const ptyTerminal = require('./ptyTerminal');
-const searxng = require('./searxng');
+const auth = require('./auth');
+
+// DEFERRED: Load heavy modules lazily to speed up startup
+let modelScanner = null;
+let huggingface = null;
+let deepSearch = null;
+let imageGen = null;
+let ollama = null;
+let ollamaManager = null;
+let localLlama = null;
+let openmindModels = null;
+let ptyTerminal = null;
+let searxng = null;
+let training = null;
+
+// Lazy loaders for heavy modules with timing
+function getModelScanner() {
+    if (!modelScanner) {
+        const start = Date.now();
+        modelScanner = require('./modelScanner');
+        console.log(`[TIMING] modelScanner loaded in ${Date.now() - start}ms`);
+    }
+    return modelScanner;
+}
+function getHuggingface() {
+    if (!huggingface) {
+        const start = Date.now();
+        huggingface = require('./huggingface');
+        console.log(`[TIMING] huggingface loaded in ${Date.now() - start}ms`);
+    }
+    return huggingface;
+}
+function getDeepSearch() {
+    if (!deepSearch) {
+        const start = Date.now();
+        deepSearch = require('./deepSearch');
+        console.log(`[TIMING] deepSearch loaded in ${Date.now() - start}ms`);
+    }
+    return deepSearch;
+}
+function getImageGen() {
+    if (!imageGen) {
+        const start = Date.now();
+        imageGen = require('./imageGen');
+        console.log(`[TIMING] imageGen loaded in ${Date.now() - start}ms`);
+    }
+    return imageGen;
+}
+function getOllama() {
+    if (!ollama) {
+        const start = Date.now();
+        ollama = require('./ollama');
+        console.log(`[TIMING] ollama loaded in ${Date.now() - start}ms`);
+    }
+    return ollama;
+}
+function getOllamaManager() {
+    if (!ollamaManager) {
+        const start = Date.now();
+        ollamaManager = require('./ollamaManager');
+        console.log(`[TIMING] ollamaManager loaded in ${Date.now() - start}ms`);
+    }
+    return ollamaManager;
+}
+function getLocalLlama() {
+    if (!localLlama) {
+        const start = Date.now();
+        localLlama = require('./localLlama');
+        console.log(`[TIMING] localLlama loaded in ${Date.now() - start}ms`);
+    }
+    return localLlama;
+}
+function getOpenmindModels() {
+    if (!openmindModels) {
+        const start = Date.now();
+        openmindModels = require('./openmindModels');
+        console.log(`[TIMING] openmindModels loaded in ${Date.now() - start}ms`);
+    }
+    return openmindModels;
+}
+function getPtyTerminal() {
+    if (!ptyTerminal) {
+        const start = Date.now();
+        ptyTerminal = require('./ptyTerminal');
+        console.log(`[TIMING] ptyTerminal loaded in ${Date.now() - start}ms`);
+    }
+    return ptyTerminal;
+}
+function getSearxng() {
+    if (!searxng) {
+        const start = Date.now();
+        searxng = require('./searxng');
+        console.log(`[TIMING] searxng loaded in ${Date.now() - start}ms`);
+    }
+    return searxng;
+}
+function getTraining() {
+    if (!training) {
+        const start = Date.now();
+        training = require('./training');
+        console.log(`[TIMING] training loaded in ${Date.now() - start}ms`);
+    }
+    return training;
+}
 
 let mainWindow;
 let ollamaHost = '127.0.0.1';
@@ -67,10 +165,16 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true
         },
-        backgroundColor: '#0a0a0a'
+        backgroundColor: '#151517',
+        show: false  // Don't show until ready
     });
 
     const isDev = !app.isPackaged;
+
+    // Show window when ready to prevent white/gray flash
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+    });
 
     if (isDev) {
         mainWindow.loadURL('http://localhost:5173');
@@ -110,14 +214,14 @@ ipcMain.on('close-window', () => {
 
 // Ollama Server Management (with bundled binary support)
 ipcMain.handle('get-ollama-server-status', async () => {
-    const status = ollamaManager.getStatus();
-    const running = await ollamaManager.isServerRunning();
+    const status = getOllamaManager().getStatus();
+    const running = await getOllamaManager().isServerRunning();
     return { ...status, running };
 });
 
 ipcMain.handle('start-ollama-server', async () => {
     console.log('Starting bundled Ollama server...');
-    return await ollamaManager.startServer((log) => {
+    return await getOllamaManager().startServer((log) => {
         console.log('[Ollama Server]', log.type, log.message);
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ollama-server-log', log);
@@ -126,12 +230,12 @@ ipcMain.handle('start-ollama-server', async () => {
 });
 
 ipcMain.handle('stop-ollama-server', async () => {
-    ollamaManager.stopServer();
+    getOllamaManager().stopServer();
     return { success: true };
 });
 
 ipcMain.handle('download-ollama', async () => {
-    return await ollamaManager.downloadOllama((progress) => {
+    return await getOllamaManager().downloadOllama((progress) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ollama-download-progress', progress);
         }
@@ -139,13 +243,13 @@ ipcMain.handle('download-ollama', async () => {
 });
 
 ipcMain.handle('check-ollama-updates', async () => {
-    return await ollamaManager.checkForUpdates();
+    return await getOllamaManager().checkForUpdates();
 });
 
 // Fetch Ollama Models (using ollama-js library)
 ipcMain.handle('get-ollama-models', async () => {
     const host = `http://${ollamaHost}:11434`;
-    return await ollama.listModels(host);
+    return await getOllama().listModels(host);
 });
 
 // Pull Ollama Model
@@ -153,7 +257,7 @@ ipcMain.handle('pull-ollama-model', async (event, modelName) => {
     console.log('Pulling Ollama model:', modelName);
     const host = `http://${ollamaHost}:11434`;
     
-    return await ollama.pullModel(modelName, (progress) => {
+    return await getOllama().pullModel(modelName, (progress) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ollama-pull-progress', { modelName, ...progress });
         }
@@ -164,19 +268,19 @@ ipcMain.handle('pull-ollama-model', async (event, modelName) => {
 ipcMain.handle('delete-ollama-model', async (event, modelName) => {
     console.log('Deleting Ollama model:', modelName);
     const host = `http://${ollamaHost}:11434`;
-    return await ollama.deleteModel(modelName, host);
+    return await getOllama().deleteModel(modelName, host);
 });
 
 // Get Ollama Model Info
 ipcMain.handle('get-ollama-model-info', async (event, modelName) => {
     const host = `http://${ollamaHost}:11434`;
-    return await ollama.showModel(modelName, host);
+    return await getOllama().showModel(modelName, host);
 });
 
 // Execute Ollama CLI Command (for terminal mode)
 ipcMain.handle('execute-ollama-command', async (event, command) => {
     console.log('Executing Ollama command:', command);
-    return await ollama.executeCommand(command, (progress) => {
+    return await getOllama().executeCommand(command, (progress) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ollama-terminal-progress', progress);
         }
@@ -187,12 +291,12 @@ ipcMain.handle('execute-ollama-command', async (event, command) => {
 
 // Get local GGUF models
 ipcMain.handle('get-local-models', async () => {
-    return localLlama.listLocalModels();
+    return getLocalLlama().listLocalModels();
 });
 
 // Load a local model
 ipcMain.handle('load-local-model', async (event, modelPath) => {
-    return await localLlama.loadModel(modelPath, (progress) => {
+    return await getLocalLlama().loadModel(modelPath, (progress) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('local-model-progress', progress);
         }
@@ -201,21 +305,56 @@ ipcMain.handle('load-local-model', async (event, modelPath) => {
 
 // Unload local model
 ipcMain.handle('unload-local-model', async () => {
-    await localLlama.unloadModel();
+    await getLocalLlama().unloadModel();
     return { success: true };
 });
 
 // Get local LLM status
 ipcMain.handle('get-local-llm-status', async () => {
-    return localLlama.getStatus();
+    return getLocalLlama().getStatus();
 });
 
 // Chat with local model
-ipcMain.handle('send-local-message', async (event, { messages }) => {
-    console.log('Sending to local LLM:', { messageCount: messages.length });
+ipcMain.handle('send-local-message', async (event, { messages, modelName }) => {
+    console.log('Sending to local LLM:', { messageCount: messages.length, modelName });
     
     try {
-        const response = await localLlama.chat(
+        // Check if using an OpenMind model config
+        let options = {};
+        let config = null;
+        
+        if (modelName) {
+            config = getOpenmindModels().getModel(modelName);
+            if (config) {
+                options = { ...config.params } || {};
+                options.systemPrompt = config.systemPrompt;
+                
+                // Check if model needs to be loaded
+                const status = getLocalLlama().getStatus();
+                const currentConfig = getLocalLlama().getCurrentConfig();
+                
+                if (!status.modelLoaded || currentConfig?.name !== modelName) {
+                    console.log('Loading OpenMind model:', modelName);
+                    
+                    // Send progress to frontend
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('ollama-message-update', 'Loading model...');
+                    }
+                    
+                    const loadResult = await getLocalLlama().loadModel(config.baseModel, (progress) => {
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            mainWindow.webContents.send('local-model-progress', progress);
+                        }
+                    }, config);
+                    
+                    if (!loadResult.success) {
+                        throw new Error(`Failed to load model: ${loadResult.error}`);
+                    }
+                }
+            }
+        }
+        
+        const response = await getLocalLlama().chat(
             messages,
             (content) => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
@@ -226,13 +365,106 @@ ipcMain.handle('send-local-message', async (event, { messages }) => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('ollama-thinking-update', thinking);
                 }
-            }
+            },
+            options
         );
         return response;
     } catch (error) {
         console.error('Local LLM error:', error);
         throw error;
     }
+});
+
+// ============ OpenMind Model Management ============
+
+// List OpenMind custom models
+ipcMain.handle('openmind-list-models', async () => {
+    return getOpenmindModels().listModels();
+});
+
+// Get a specific OpenMind model
+ipcMain.handle('openmind-get-model', async (event, name) => {
+    return getOpenmindModels().getModel(name);
+});
+
+// Create OpenMind model
+ipcMain.handle('openmind-create-model', async (event, config) => {
+    console.log('Creating OpenMind model:', config.name);
+    
+    return await getOpenmindModels().createModel(config, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('openmind-create-progress', progress);
+        }
+    });
+});
+
+// Update OpenMind model
+ipcMain.handle('openmind-update-model', async (event, { name, updates }) => {
+    return getOpenmindModels().updateModel(name, updates);
+});
+
+// Delete OpenMind model
+ipcMain.handle('openmind-delete-model', async (event, name) => {
+    return getOpenmindModels().deleteModel(name);
+});
+
+// Scan available GGUF models
+ipcMain.handle('openmind-scan-gguf', async () => {
+    return getOpenmindModels().scanGGUFModels();
+});
+
+// Import GGUF model
+ipcMain.handle('openmind-import-model', async (event, sourcePath) => {
+    return await getOpenmindModels().importModel(sourcePath, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('openmind-import-progress', progress);
+        }
+    });
+});
+
+// Get model presets
+ipcMain.handle('openmind-get-presets', async () => {
+    return getOpenmindModels().getModelPresets();
+});
+
+// Get chat templates
+ipcMain.handle('openmind-get-templates', async () => {
+    return getOpenmindModels().getChatTemplates();
+});
+
+// Parse GGUF metadata
+ipcMain.handle('openmind-parse-gguf', async (event, filePath) => {
+    return await getOpenmindModels().parseGGUFMetadata(filePath);
+});
+
+// Select GGUF file via dialog
+ipcMain.handle('openmind-select-gguf', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [
+            { name: 'GGUF Models', extensions: ['gguf'] }
+        ]
+    });
+    
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false };
+    }
+    
+    return { success: true, path: result.filePaths[0] };
+});
+
+// Load OpenMind model for inference
+ipcMain.handle('openmind-load-model', async (event, modelName) => {
+    const config = getOpenmindModels().getModel(modelName);
+    if (!config) {
+        return { success: false, error: `Model "${modelName}" not found` };
+    }
+    
+    return await getLocalLlama().loadModel(config.baseModel, (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('local-model-progress', progress);
+        }
+    }, config);
 });
 
 // Send message to Ollama with streaming and reasoning support (using ollama-js library)
@@ -280,7 +512,7 @@ ipcMain.handle('send-ollama-message', async (event, { model, messages }) => {
     };
 
     try {
-        const response = await ollama.chat({ model, messages: finalMessages, host }, onThinking, onContent);
+        const response = await getOllama().chat({ model, messages: finalMessages, host }, onThinking, onContent);
         console.log('Stream complete');
         return response;
     } catch (error) {
@@ -350,7 +582,7 @@ ipcMain.handle('send-deepsearch-message', async (event, { model, messages }) => 
         content: compressContent(msg.content)
     }));
     
-    const tools = getDeepSearchTools();
+    const tools = getDeepSearch().getDeepSearchTools();
 
     const now = new Date();
     const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -420,7 +652,7 @@ THINKING RULES:
         };
 
         try {
-            const response = await ollama.chatWithTools(
+            const response = await getOllama().chatWithTools(
                 { model, messages: allMessages, tools, host, modelOptions },
                 onThinking,
                 onContent
@@ -478,7 +710,7 @@ THINKING RULES:
                         });
                     }
                     
-                    const result = await executeToolCall(toolName, toolArgs);
+                    const result = await getDeepSearch().executeToolCall(toolName, toolArgs);
                     
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('deepsearch-tool-use', {
@@ -555,37 +787,41 @@ ipcMain.handle('delete-chat', async (event, chatId) => {
 
 // Model Scanner IPC Handlers
 ipcMain.handle('scan-models-folder', async () => {
-    return scanModelsFolder();
+    return getModelScanner().scanModelsFolder();
 });
 
 ipcMain.handle('scan-diffusion-models', async () => {
-    return scanDiffusionModels();
+    return getModelScanner().scanDiffusionModels();
 });
 
 ipcMain.handle('get-model-info', async (event, modelPath) => {
-    return getModelInfo(modelPath);
+    return getModelScanner().getModelInfo(modelPath);
 });
 
 // Hugging Face IPC Handlers
 ipcMain.handle('hf-set-token', async (event, token) => {
-    return setApiToken(token);
+    return getHuggingface().setApiToken(token);
 });
 
 ipcMain.handle('hf-load-token', async () => {
-    return loadApiToken();
+    return getHuggingface().loadApiToken();
 });
 
 ipcMain.handle('hf-clear-token', async () => {
-    return clearApiToken();
+    return getHuggingface().clearApiToken();
 });
 
 ipcMain.handle('hf-search-models', async (event, query) => {
-    return searchModels(query);
+    return getHuggingface().searchModels(query);
+});
+
+ipcMain.handle('hf-get-model-info', async (event, modelId) => {
+    return getHuggingface().getModelInfo(modelId);
 });
 
 ipcMain.handle('hf-download-model', async (event, modelId) => {
     return new Promise((resolve) => {
-        downloadModel(modelId, (progress) => {
+        getHuggingface().downloadModel(modelId, (progress) => {
             try {
                 if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
                     mainWindow.webContents.send('hf-download-progress', { modelId, progress });
@@ -597,8 +833,22 @@ ipcMain.handle('hf-download-model', async (event, modelId) => {
     });
 });
 
+ipcMain.handle('hf-download-gguf', async (event, modelId, filename) => {
+    return new Promise((resolve, reject) => {
+        getHuggingface().downloadGGUF(modelId, filename, (progress) => {
+            try {
+                if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+                    mainWindow.webContents.send('hf-gguf-download-progress', { modelId, filename, progress });
+                }
+            } catch (err) {
+                console.error('Error sending GGUF download progress:', err.message);
+            }
+        }).then(resolve).catch(err => resolve({ success: false, error: err.message }));
+    });
+});
+
 ipcMain.handle('hf-get-user-info', async () => {
-    return getUserInfo();
+    return getHuggingface().getUserInfo();
 });
 
 // Open external links in system browser
@@ -667,16 +917,16 @@ ipcMain.handle('generate-image', async (event, { prompt, negativePrompt, width, 
         };
 
         // Load model if specified and different from current
-        const status = imageGen.getStatus();
+        const status = getImageGen().getStatus();
         const targetModel = localPath || model || 'stabilityai/sdxl-turbo';
         
         if (!status.running || status.currentModel !== targetModel) {
             onProgress(`Loading model: ${displayName}...`, 0);
-            await imageGen.loadModel(model || 'local-model', localPath, onProgress);
+            await getImageGen().loadModel(model || 'local-model', localPath, onProgress);
         }
 
         // Generate image
-        const result = await imageGen.generateImage({
+        const result = await getImageGen().generateImage({
             prompt,
             negativePrompt: negativePrompt || '',
             width: width || 512,
@@ -703,7 +953,7 @@ ipcMain.handle('load-image-model', async (event, { modelId, localPath }) => {
                 mainWindow.webContents.send('image-gen-progress', { message });
             }
         };
-        await imageGen.loadModel(modelId, localPath, onProgress);
+        await getImageGen().loadModel(modelId, localPath, onProgress);
         return { success: true, model: modelId, localPath };
     } catch (error) {
         return { success: false, error: error.message };
@@ -713,7 +963,7 @@ ipcMain.handle('load-image-model', async (event, { modelId, localPath }) => {
 // Unload image model to free memory
 ipcMain.handle('unload-image-model', async () => {
     try {
-        await imageGen.unloadModel();
+        await getImageGen().unloadModel();
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -722,12 +972,48 @@ ipcMain.handle('unload-image-model', async () => {
 
 // Check image generation status
 ipcMain.handle('check-image-gen-status', async () => {
-    return imageGen.getStatus();
+    return getImageGen().getStatus();
 });
 
 // Check Python setup for image generation
 ipcMain.handle('check-python-setup', async () => {
-    return imageGen.checkPythonSetup();
+    return getImageGen().checkPythonSetup();
+});
+
+// Docker status check
+ipcMain.handle('check-docker-status', async () => {
+    return new Promise((resolve) => {
+        exec('docker info', { timeout: 5000 }, (error, stdout) => {
+            if (error) {
+                resolve({ running: false, error: error.message });
+            } else {
+                // Parse Docker version from output
+                const versionMatch = stdout.match(/Server Version:\s*(\S+)/);
+                const version = versionMatch ? versionMatch[1] : 'unknown';
+                resolve({ running: true, version });
+            }
+        });
+    });
+});
+
+// Get running Docker containers with port mappings
+ipcMain.handle('get-docker-containers', async () => {
+    return new Promise((resolve) => {
+        exec('docker ps --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"', { timeout: 10000 }, (error, stdout) => {
+            if (error) {
+                resolve({ success: false, error: error.message, containers: [] });
+            } else {
+                const lines = stdout.trim().split('\n').filter(line => line.trim());
+                const containers = lines.map(line => {
+                    const [id, name, image, status, ports] = line.split('|');
+                    // Parse ports like "0.0.0.0:8080->80/tcp, 0.0.0.0:443->443/tcp"
+                    const portMappings = ports ? ports.split(',').map(p => p.trim()).filter(p => p) : [];
+                    return { id, name, image, status, ports: portMappings };
+                });
+                resolve({ success: true, containers });
+            }
+        });
+    });
 });
 
 // Model Creator - Create custom Ollama models
@@ -877,80 +1163,73 @@ ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPro
     }
 });
 
+// Disable GPU acceleration to prevent network service crashes
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+
 app.whenReady().then(async () => {
     console.log('=== Electron App Starting ===');
+    const startTime = Date.now();
     
-    // Load custom model system prompts
-    loadCustomModelPrompts();
+    // CRITICAL PATH - Initialize only what's needed for window display
+    auth.initPaths();
+    console.log('✓ Secure auth storage initialized');
     
-    // Try to connect to Ollama (optional - app works without it)
-    console.log('Checking for Ollama...');
-    const ollamaRunning = await ollamaManager.isServerRunning();
-    if (ollamaRunning) {
-        console.log('✓ Ollama server detected');
-    } else {
-        console.log('ℹ Ollama not running');
-        // Check if bundled Ollama is available
-        if (ollamaManager.hasBundledOllama()) {
-            console.log('✓ Bundled Ollama available at:', ollamaManager.getBundledOllamaPath());
-            console.log('  Click "Start Server" in the sidebar to start Ollama');
-        } else {
-            console.log('ℹ No bundled Ollama for this platform - local GGUF models available via node-llama-cpp');
-        }
-    }
-    
-    // Initialize local LLM support
-    console.log('Initializing local LLM support (node-llama-cpp)...');
-    try {
-        await localLlama.initLlama();
-        console.log('✓ Local LLM ready');
-    } catch (error) {
-        console.log('⚠ Local LLM init deferred (will init on first use)');
-    }
-    
-    console.log('Initializing database...');
     initDatabase();
-    console.log('Initializing DeepSearch browser...');
-    await initBrowser(); // Pre-start browser for faster searches
+    console.log('✓ Database initialized');
     
-    // Setup SearXNG handlers
-    console.log('Setting up SearXNG handlers...');
-    searxng.setupSearXNGHandlers();
-    const searxngRunning = await searxng.checkSearXNGStatus();
-    if (searxngRunning) {
-        console.log('✓ SearXNG server detected at localhost:8888');
-    } else {
-        console.log('ℹ SearXNG not running - start with: docker-compose up -d');
-    }
-    
-    // Check Python setup for image generation
-    console.log('Checking Python setup for image generation...');
-    const pythonStatus = await imageGen.checkPythonSetup();
-    if (pythonStatus.available) {
-        console.log('✓ Python and dependencies available for image generation');
-        if (pythonStatus.pythonCmd) {
-            console.log('  Using:', pythonStatus.pythonCmd);
-        }
-    } else if (pythonStatus.missing && pythonStatus.missing.length > 0) {
-        console.log('⚠ Missing Python packages:', pythonStatus.missing.join(', '));
-        console.log('  Install with:', pythonStatus.installCmd);
-        if (pythonStatus.pythonCmd) {
-            console.log('  Python found:', pythonStatus.pythonCmd);
-        }
-    } else if (pythonStatus.error) {
-        console.log('⚠ Python issue:', pythonStatus.error);
-        console.log('  Fix:', pythonStatus.installCmd);
-    } else {
-        console.log('⚠ Python not found. Install Python 3.8+ from python.org');
-    }
-    
-    console.log('IPC Handlers registered:');
-    console.log('- Chat handlers: load-chats, save-chats, save-chat, delete-chat');
-    console.log('- Model scanner handlers: scan-models-folder, scan-diffusion-models, get-model-info');
-    console.log('- Image generation handlers: generate-image, load-image-model, check-python-setup');
-    console.log('- Hugging Face handlers: hf-set-token, hf-load-token, hf-clear-token, hf-search-models, hf-download-model, hf-get-user-info');
+    // Create window FIRST for faster perceived startup
     console.log('Creating window...');
     createWindow();
+    console.log(`✓ Window created in ${Date.now() - startTime}ms`);
+    
+    // DEFERRED INITIALIZATION - Run after window is visible (use setTimeout to not block)
+    setTimeout(async () => {
+        console.log('Starting deferred initialization...');
+        
+        // Load custom model system prompts (fast, local file)
+        loadCustomModelPrompts();
+        
+        // Check Ollama status (non-blocking) - only load module when needed
+        setTimeout(() => {
+            getOllamaManager().isServerRunning().then(ollamaRunning => {
+                if (ollamaRunning) {
+                    console.log('✓ Ollama server detected');
+                } else {
+                    console.log('ℹ Ollama not running');
+                    if (getOllamaManager().hasBundledOllama()) {
+                        console.log('✓ Bundled Ollama available');
+                    }
+                }
+            });
+        }, 100);
+        
+        // Setup SearXNG handlers (fast) - only load module when needed
+        setTimeout(() => {
+            getSearxng().setupSearXNGHandlers();
+            getSearxng().checkSearXNGStatus().then(running => {
+                if (running) console.log('✓ SearXNG detected');
+            });
+        }, 200);
+        
+        // Initialize DeepSearch browser LAZILY - only when first needed
+        console.log('ℹ DeepSearch browser will init on first use');
+        
+        // Local LLM init deferred to first use
+        console.log('ℹ Local LLM will init on first use');
+        
+        // Python check in background (don't block) - only load module when needed
+        setTimeout(() => {
+            getImageGen().checkPythonSetup().then(pythonStatus => {
+                if (pythonStatus.available) {
+                    console.log('✓ Python available for image generation');
+                }
+            });
+        }, 300);
+        
+        console.log(`✓ Deferred init complete. Total startup: ${Date.now() - startTime}ms`);
+    }, 50); // Small delay to let window render first
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -1024,11 +1303,11 @@ function checkOllamaStatus(win) {
 
 // HuggingFace Inference API handlers
 ipcMain.handle('hf-get-inference-models', async () => {
-    return { success: true, models: getInferenceModels() };
+    return { success: true, models: getHuggingface().getInferenceModels() };
 });
 
 ipcMain.handle('hf-search-inference-models', async (event, query) => {
-    return await searchInferenceModels(query, 5);
+    return await getHuggingface().searchInferenceModels(query, 5);
 });
 
 ipcMain.handle('send-hf-message', async (event, { model, messages }) => {
@@ -1040,11 +1319,11 @@ ipcMain.handle('send-hf-message', async (event, { model, messages }) => {
         if (fs.existsSync(settingsFile)) {
             const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
             if (settings.hfApiKey) {
-                setApiToken(settings.hfApiKey);
+                getHuggingface().setApiToken(settings.hfApiKey);
             }
         }
         
-        const response = await sendInferenceMessage(model, messages, 
+        const response = await getHuggingface().sendInferenceMessage(model, messages, 
             // onChunk - stream content updates
             (content) => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1099,45 +1378,127 @@ ipcMain.handle('save-settings', async (event, settings) => {
 
 // Create/start PTY terminal
 ipcMain.handle('pty-create', async (event, options = {}) => {
-    return ptyTerminal.createPty(mainWindow, options);
+    return getPtyTerminal().createPty(mainWindow, options);
 });
 
 // Write to PTY (user input)
 ipcMain.handle('pty-write', async (event, data) => {
-    return ptyTerminal.writeToPty(data);
+    return getPtyTerminal().writeToPty(data);
 });
 
 // Resize PTY
 ipcMain.handle('pty-resize', async (event, { cols, rows }) => {
-    return ptyTerminal.resizePty(cols, rows);
+    return getPtyTerminal().resizePty(cols, rows);
 });
 
 // Kill PTY
 ipcMain.handle('pty-kill', async () => {
-    return ptyTerminal.killPty();
+    return getPtyTerminal().killPty();
 });
 
 // Get PTY status
 ipcMain.handle('pty-status', async () => {
-    return ptyTerminal.getPtyInfo();
+    return getPtyTerminal().getPtyInfo();
+});
+
+// ============ Auth IPC Handlers ============
+
+ipcMain.handle('auth-register', async (event, { email, password, name }) => {
+    return auth.register(email, password, name);
+});
+
+ipcMain.handle('auth-login', async (event, { email, password }) => {
+    return auth.login(email, password);
+});
+
+ipcMain.handle('auth-logout', async () => {
+    return auth.logout();
+});
+
+ipcMain.handle('auth-get-current-user', async () => {
+    return auth.getCurrentUser();
+});
+
+ipcMain.handle('auth-update-profile', async (event, updates) => {
+    return auth.updateProfile(updates);
+});
+
+ipcMain.handle('auth-connect-huggingface', async (event, { token, username }) => {
+    return auth.connectHuggingFace(token, username);
+});
+
+ipcMain.handle('auth-disconnect-huggingface', async () => {
+    return auth.disconnectHuggingFace();
+});
+
+ipcMain.handle('auth-change-password', async (event, { currentPassword, newPassword }) => {
+    return auth.changePassword(currentPassword, newPassword);
+});
+
+// Secure token storage
+ipcMain.handle('auth-store-token', async (event, { key, value }) => {
+    return auth.storeToken(key, value);
+});
+
+ipcMain.handle('auth-get-token', async (event, key) => {
+    return { success: true, value: auth.getToken(key) };
+});
+
+ipcMain.handle('auth-delete-token', async (event, key) => {
+    return auth.deleteToken(key);
+});
+
+// ============ Training IPC Handlers ============
+
+ipcMain.handle('training-check-org-membership', async (event, hfToken) => {
+    return getTraining().checkOrgMembership(hfToken);
+});
+
+ipcMain.handle('training-get-base-models', async () => {
+    return getTraining().getBaseModels();
+});
+
+ipcMain.handle('training-get-presets', async () => {
+    return getTraining().getTrainingPresets();
+});
+
+ipcMain.handle('training-validate-data', async (event, { data, format }) => {
+    return getTraining().validateTrainingData(data, format);
+});
+
+ipcMain.handle('training-get-subscription-tiers', async () => {
+    return getTraining().getSubscriptionTiers();
+});
+
+ipcMain.handle('training-start', async (event, { config, hfToken }) => {
+    return getTraining().startTraining(config, hfToken);
+});
+
+ipcMain.handle('training-check-status', async (event, { jobId, hfToken }) => {
+    return getTraining().checkTrainingStatus(jobId, hfToken);
 });
 
 app.on('window-all-closed', async () => {
-    // Kill PTY terminal
-    ptyTerminal.killPty();
+    // Kill PTY terminal (only if loaded)
+    if (ptyTerminal) getPtyTerminal().killPty();
     
-    // Close DeepSearch browser
-    await closeBrowser();
+    // Close DeepSearch browser (only if loaded)
+    if (deepSearch) await getDeepSearch().closeBrowser();
     
-    // Stop image generation process
-    imageGen.stopProcess();
+    // Stop image generation process (only if loaded)
+    if (imageGen) getImageGen().stopProcess();
     
-    // Stop Ollama server if we started it
-    ollamaManager.stopServer();
+    // Stop Ollama server if we started it (only if loaded)
+    if (ollamaManager) getOllamaManager().stopServer();
     
     if (process.platform !== 'darwin') {
         app.quit();
     }
+});
+
+// Also kill PTY on before-quit to ensure cleanup
+app.on('before-quit', () => {
+    if (ptyTerminal) getPtyTerminal().killPty();
 });
 
 

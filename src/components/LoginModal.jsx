@@ -1,6 +1,8 @@
 import { useRef, useEffect } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 const LoginModal = ({ isOpen, onClose, onLogin, isLoggingIn, loginError, tokenInput, setTokenInput, setLoginError }) => {
+  const { theme } = useTheme();
   const tokenInputRef = useRef(null);
 
   useEffect(() => {
@@ -82,7 +84,7 @@ const LoginModal = ({ isOpen, onClose, onLogin, isLoggingIn, loginError, tokenIn
             width: '100%',
             padding: '10px 12px',
             background: '#1b1b1c',
-            border: loginError ? '1px solid #ff6b6b' : '1px solid rgba(255,255,255,0.15)',
+            border: loginError ? `1px solid ${theme.error}` : '1px solid rgba(255,255,255,0.15)',
             borderRadius: '8px',
             color: '#ececec',
             fontSize: '0.9rem',
@@ -94,7 +96,7 @@ const LoginModal = ({ isOpen, onClose, onLogin, isLoggingIn, loginError, tokenIn
 
         {loginError && (
           <p style={{ 
-            color: '#ff6b6b', 
+            color: theme.error, 
             fontSize: '0.8rem', 
             margin: '0 0 12px 0' 
           }}>
