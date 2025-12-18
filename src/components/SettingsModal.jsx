@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  X, Eye, Settings, Info, Box, RefreshCw, 
+  X, Eye, Settings, Info,
   Sun, Moon, Type, Contrast, Zap, ZapOff, Check, AlertCircle
 } from 'lucide-react';
+import { FaDocker } from 'react-icons/fa';
+import { SiOllama } from 'react-icons/si';
+import { HuggingFace } from '@lobehub/icons';
 import { useTheme, colorblindModes } from '../contexts/ThemeContext';
+import DockerSettings from './DockerSettings';
 
 // Toggle Switch Component
 const ToggleSwitch = ({ enabled, onChange, theme, isDark }) => (
@@ -301,228 +305,6 @@ const AccessibilitySettings = () => {
 };
 
 
-// Docker Settings Section
-const DockerSettings = ({ theme, isDark }) => {
-  const [dockerStatus, setDockerStatus] = useState({ running: false, version: null });
-  const [containers, setContainers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const loadDockerInfo = async () => {
-    try {
-      // Check Docker status
-      const status = await window.electronAPI?.checkDockerStatus();
-      setDockerStatus(status || { running: false });
-      
-      // If Docker is running, get containers
-      if (status?.running) {
-        const result = await window.electronAPI?.getDockerContainers();
-        if (result?.success) {
-          setContainers(result.containers || []);
-        }
-      } else {
-        setContainers([]);
-      }
-    } catch (error) {
-      console.error('Error loading Docker info:', error);
-      setDockerStatus({ running: false, error: error.message });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    loadDockerInfo();
-  }, []);
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    loadDockerInfo();
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h3 style={{ color: theme.text, fontSize: '1.1rem', fontWeight: '600', margin: '0 0 8px 0' }}>
-            Docker
-          </h3>
-          <p style={{ color: theme.textSecondary, fontSize: '0.85rem', margin: 0 }}>
-            View Docker status and running containers.
-          </p>
-        </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          style={{
-            background: theme.bgTertiary,
-            border: `1px solid ${theme.border}`,
-            borderRadius: '6px',
-            padding: '8px 12px',
-            cursor: refreshing ? 'not-allowed' : 'pointer',
-            color: theme.textSecondary,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '0.85rem',
-            opacity: refreshing ? 0.6 : 1,
-          }}
-        >
-          <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-          Refresh
-        </button>
-      </div>
-
-      {/* Docker Status */}
-      <div style={{
-        padding: '16px',
-        background: theme.bgTertiary,
-        borderRadius: '8px',
-        border: `1px solid ${theme.border}`,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-      }}>
-        <div style={{
-          width: '40px',
-          height: '40px',
-          borderRadius: '8px',
-          background: dockerStatus.running ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <Box size={20} color={dockerStatus.running ? '#22c55e' : '#ef4444'} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: theme.text, fontSize: '0.95rem', fontWeight: '500' }}>
-            Docker {dockerStatus.running ? 'Connected' : 'Not Connected'}
-          </div>
-          <div style={{ color: theme.textSecondary, fontSize: '0.8rem', marginTop: '2px' }}>
-            {loading ? 'Checking...' : dockerStatus.running 
-              ? `Version ${dockerStatus.version}` 
-              : 'Docker is not running or not installed'}
-          </div>
-        </div>
-        <div style={{
-          width: '10px',
-          height: '10px',
-          borderRadius: '50%',
-          background: dockerStatus.running ? '#22c55e' : '#ef4444',
-        }} />
-      </div>
-
-      {/* Running Containers */}
-      {dockerStatus.running && (
-        <div>
-          <label style={{ 
-            display: 'block', color: theme.textSecondary, fontSize: '0.75rem',
-            marginBottom: '10px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.5px'
-          }}>
-            Running Containers ({containers.length})
-          </label>
-          
-          {containers.length === 0 ? (
-            <div style={{
-              padding: '24px',
-              background: theme.bgTertiary,
-              borderRadius: '8px',
-              border: `1px solid ${theme.border}`,
-              textAlign: 'center',
-              color: theme.textSecondary,
-              fontSize: '0.85rem',
-            }}>
-              No containers running
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {containers.map((container) => (
-                <div
-                  key={container.id}
-                  style={{
-                    padding: '14px 16px',
-                    background: theme.bgTertiary,
-                    borderRadius: '8px',
-                    border: `1px solid ${theme.border}`,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <Box size={16} color={theme.textSecondary} />
-                      <span style={{ color: theme.text, fontSize: '0.9rem', fontWeight: '500' }}>
-                        {container.name}
-                      </span>
-                    </div>
-                    <span style={{
-                      padding: '3px 8px',
-                      background: 'rgba(34, 197, 94, 0.15)',
-                      color: '#22c55e',
-                      borderRadius: '4px',
-                      fontSize: '0.7rem',
-                      fontWeight: '500',
-                    }}>
-                      {container.status?.split(' ')[0] || 'Running'}
-                    </span>
-                  </div>
-                  
-                  <div style={{ color: theme.textSecondary, fontSize: '0.8rem', marginBottom: '6px' }}>
-                    Image: {container.image}
-                  </div>
-                  
-                  {container.ports && container.ports.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
-                      {container.ports.map((port, idx) => (
-                        <span
-                          key={idx}
-                          style={{
-                            padding: '4px 8px',
-                            background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                            borderRadius: '4px',
-                            fontSize: '0.75rem',
-                            color: theme.text,
-                            fontFamily: 'monospace',
-                          }}
-                        >
-                          {port}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Help text when Docker not running */}
-      {!dockerStatus.running && !loading && (
-        <div style={{
-          padding: '16px',
-          background: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-          borderRadius: '8px',
-          border: '1px solid rgba(239, 68, 68, 0.2)',
-        }}>
-          <div style={{ color: theme.text, fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px' }}>
-            Docker not detected
-          </div>
-          <div style={{ color: theme.textSecondary, fontSize: '0.8rem', lineHeight: 1.5 }}>
-            Make sure Docker Desktop is installed and running. Some features like SearXNG require Docker.
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </div>
-  );
-};
-
 // About Section
 const AboutSettings = ({ theme }) => {
   return (
@@ -555,15 +337,22 @@ const AboutSettings = ({ theme }) => {
         padding: '16px', background: theme.bgTertiary, borderRadius: '8px',
         border: `1px solid ${theme.border}`,
       }}>
-        <div style={{ color: theme.textSecondary, fontSize: '0.8rem', lineHeight: 1.6 }}>
-          <strong style={{ color: theme.text }}>Features:</strong>
-          <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-            <li>Local GGUF model support via llama.cpp</li>
-            <li>Ollama integration</li>
-            <li>HuggingFace model discovery</li>
-            <li>DeepSearch with web browsing</li>
-            <li>Custom model creation</li>
-          </ul>
+        <div style={{ color: theme.text, fontSize: '0.85rem', fontWeight: '500', marginBottom: '12px' }}>
+          Integrations
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textSecondary, fontSize: '0.8rem' }}>
+            <SiOllama size={18} style={{ fill: '#fff' }} />
+            <span>Ollama</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textSecondary, fontSize: '0.8rem' }}>
+            <HuggingFace.Color size={18} />
+            <span>HuggingFace</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textSecondary, fontSize: '0.8rem' }}>
+            <FaDocker size={18} style={{ fill: '#2496ED' }} />
+            <span>Docker</span>
+          </div>
         </div>
       </div>
     </div>
@@ -573,7 +362,7 @@ const AboutSettings = ({ theme }) => {
 // Navigation items
 const navItems = [
   { id: 'general', label: 'General', icon: Settings },
-  { id: 'docker', label: 'Docker', icon: Box },
+  { id: 'docker', label: 'Docker', icon: FaDocker },
   { id: 'accessibility', label: 'Accessibility', icon: Eye },
   { id: 'about', label: 'About', icon: Info },
 ];
@@ -595,9 +384,8 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
     onClose();
   };
 
-  if (!isOpen) return null;
-
-  const renderContent = () => {
+  // Memoize content to prevent unnecessary re-renders
+  const content = useMemo(() => {
     switch (activeSection) {
       case 'general': return <GeneralSettings theme={theme} isDark={isDark} />;
       case 'docker': return <DockerSettings theme={theme} isDark={isDark} />;
@@ -605,7 +393,9 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
       case 'about': return <AboutSettings theme={theme} />;
       default: return null;
     }
-  };
+  }, [activeSection, theme, isDark]);
+
+  if (!isOpen) return null;
 
 
   return createPortal(
@@ -696,7 +486,7 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
           {/* Content Area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ flex: 1, padding: '20px 24px', overflowY: 'auto' }}>
-              {renderContent()}
+              {content}
             </div>
 
             {/* Footer */}

@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, Radar, Image, Terminal, Square } from 'lucide-react';
-import XTerminal from './XTerminal';
+import { Paperclip, ArrowUp, ChevronDown, Radar, Image, Mic, Loader2 } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModelManager, useImageGeneration, useDeepSearch } from '../hooks';
@@ -46,10 +45,15 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [expandedToolCalls, setExpandedToolCalls] = useState({});
   const [attachedImages, setAttachedImages] = useState([]);
   const [fullscreenImage, setFullscreenImage] = useState(null); // Fullscreen image modal
-
-  // Terminal mode state - now using real PTY terminal
-  const [terminalMode, setTerminalMode] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0); // 0-100 for glow effect
+  
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [whisperAvailable, setWhisperAvailable] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingStartRef = useRef(null);
 
   // Zoom level for accessibility (Ctrl + scroll wheel)
   const [zoomLevel, setZoomLevel] = useState(() => {
@@ -62,6 +66,108 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [typewriterIndex, setTypewriterIndex] = useState(0);
   
   const isNewChat = !activeChatId || messages.length === 0;
+
+  // Check if Whisper container is running
+  useEffect(() => {
+    const checkWhisper = async () => {
+      try {
+        const dockerStatus = await window.electronAPI?.checkDockerStatus();
+        if (!dockerStatus?.running) {
+          setWhisperAvailable(false);
+          return;
+        }
+        
+        const result = await window.electronAPI?.getDockerContainers();
+        if (result?.success) {
+          const whisperRunning = result.containers?.some(c => 
+            c.name?.includes('openmind-whisper') && c.state === 'running'
+          );
+          setWhisperAvailable(whisperRunning);
+        }
+      } catch {
+        setWhisperAvailable(false);
+      }
+    };
+    
+    checkWhisper();
+    const interval = setInterval(checkWhisper, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Voice recording handlers
+  const startRecording = useCallback(async () => {
+    if (isRecording || !whisperAvailable) return;
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+      
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recordingStartRef.current = Date.now();
+      
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      
+      mediaRecorderRef.current.start(100);
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Microphone error:', err);
+    }
+  }, [isRecording, whisperAvailable]);
+
+  const stopRecording = useCallback(async () => {
+    if (!isRecording || !mediaRecorderRef.current) return;
+    
+    const duration = Date.now() - recordingStartRef.current;
+    if (duration < 500) {
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+    
+    setIsRecording(false);
+    setIsTranscribing(true);
+    
+    const mimeType = mediaRecorderRef.current.mimeType;
+    mediaRecorderRef.current.stop();
+    
+    mediaRecorderRef.current.onstop = async () => {
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      
+      if (audioChunksRef.current.length === 0) {
+        setIsTranscribing(false);
+        return;
+      }
+      
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      
+      try {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const base64Audio = btoa(
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        
+        const result = await window.electronAPI?.whisperTranscribe(
+          base64Audio, mimeType, 'http://localhost:9000'
+        );
+        
+        if (result?.success && result.text?.trim()) {
+          setInput(prev => prev ? `${prev} ${result.text.trim()}` : result.text.trim());
+        }
+      } catch (err) {
+        console.error('Transcription error:', err);
+      } finally {
+        setIsTranscribing(false);
+      }
+    };
+  }, [isRecording]);
 
   // Build system prompt with user context
   const getSystemPrompt = useCallback(() => {
@@ -788,45 +894,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           </div>
         )}
 
-        {/* Terminal - inline mode - simple container */}
-        {terminalMode && (
-          <div style={{
-            background: isDark ? '#0d0d0d' : '#1a1a1a',
-            borderRadius: '6px',
-            border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.15)'}`,
-            overflow: 'hidden',
-            marginBottom: '8px',
-          }}>
-            {/* Simple header - just label */}
-            <div style={{
-              padding: '4px 8px',
-              background: isDark 
-                ? 'rgba(255,255,255,0.03)'
-                : 'rgba(0,0,0,0.04)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'}`,
-            }}>
-              <Terminal size={11} style={{ color: theme.success, opacity: 0.7 }} />
-              <span style={{ 
-                color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)', 
-                fontSize: '0.65rem', 
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>
-                Terminal
-              </span>
-            </div>
-            {/* Terminal Content */}
-            <XTerminal isDark={true} height={120} isVisible={true} />
-          </div>
-        )}
-        
-        {/* Normal chat input - hidden when terminal is active */}
-        {!terminalMode && (
-          <textarea
+        {/* Chat input */}
+        <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -854,7 +923,6 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               minHeight: '40px'
             }}
           />
-        )}
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -1195,88 +1263,71 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               )}
             </div>
 
-            {/* Terminal Toggle Button - opens real PTY terminal panel */}
-            <button
-              onClick={() => setTerminalMode(!terminalMode)}
-              style={{
-                background: terminalMode 
-                  ? (isDark ? 'white' : '#1a1a1a')
-                  : 'transparent',
-                border: terminalMode 
-                  ? 'none'
-                  : `2px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
-                color: terminalMode 
-                  ? (isDark ? 'black' : 'white')
-                  : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'),
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              title={terminalMode ? 'Hide Terminal' : 'Open Terminal'}
-            >
-              <Terminal size={16} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* Voice Input Button - only shows when Whisper is running */}
+              {whisperAvailable && (
+                <button
+                  onMouseDown={startRecording}
+                  onMouseUp={stopRecording}
+                  onMouseLeave={stopRecording}
+                  onTouchStart={startRecording}
+                  onTouchEnd={stopRecording}
+                  disabled={isTranscribing}
+                  style={{
+                    background: isRecording 
+                      ? (isDark ? 'white' : '#1a1a1a')
+                      : isTranscribing
+                        ? (isDark ? '#333' : '#e5e5e5')
+                        : 'transparent',
+                    color: isRecording 
+                      ? (isDark ? 'black' : 'white')
+                      : isTranscribing
+                        ? theme.textMuted
+                        : theme.textSecondary,
+                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: isTranscribing ? 'wait' : 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  title={isRecording ? 'Recording... Release to stop' : isTranscribing ? 'Transcribing...' : 'Hold to record voice'}
+                >
+                  {isTranscribing ? (
+                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <Mic size={16} />
+                  )}
+                </button>
+              )}
 
-            {/* Kill Terminal Button - only visible in terminal mode */}
-            {terminalMode && (
+              {/* Send Button */}
               <button
-                onClick={() => {
-                  window.electronAPI?.ptyKill?.();
-                }}
+                onClick={handleSend}
                 style={{
-                  background: 'transparent',
-                  border: `2px solid ${theme.error}50`,
-                  color: `${theme.error}cc`,
+                  background: (input.trim() || attachedImages.length > 0) 
+                    ? (isDark ? 'white' : '#1a1a1a') 
+                    : (isDark ? '#4a4a4a' : '#d1d5db'),
+                  color: (input.trim() || attachedImages.length > 0) 
+                    ? (isDark ? 'black' : 'white') 
+                    : '#888',
+                  border: 'none',
                   borderRadius: '50%',
                   width: '32px',
                   height: '32px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease'
+                  cursor: (input.trim() || attachedImages.length > 0) ? 'pointer' : 'default',
+                  transition: 'all 0.2s'
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = `${theme.error}20`;
-                  e.currentTarget.style.borderColor = `${theme.error}cc`;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.borderColor = `${theme.error}50`;
-                }}
-                title="Kill Terminal Process"
               >
-                <Square size={14} fill="currentColor" />
+                <ArrowUp size={20} strokeWidth={3} />
               </button>
-            )}
-
-            <button
-              onClick={handleSend}
-              style={{
-                background: (input.trim() || attachedImages.length > 0) 
-                  ? (isDark ? 'white' : '#1a1a1a') 
-                  : (isDark ? '#4a4a4a' : '#d1d5db'),
-                color: (input.trim() || attachedImages.length > 0) 
-                  ? (isDark ? 'black' : 'white') 
-                  : '#888',
-                border: 'none',
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: (input.trim() || attachedImages.length > 0) ? 'pointer' : 'default',
-                transition: 'all 0.2s'
-              }}
-            >
-              <ArrowUp size={20} strokeWidth={3} />
-            </button>
+            </div>
           </div>
         </div>
 

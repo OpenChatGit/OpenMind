@@ -1,5 +1,6 @@
 # OpenMind SearXNG Configuration
 # Optimized for Deep Search feature
+# Image: teamaiko/openmind-searxng:v1
 
 use_default_settings: true
 

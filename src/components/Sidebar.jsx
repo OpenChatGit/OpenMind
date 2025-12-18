@@ -1,8 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Play, Square, Zap, BookOpen, X, ChevronDown, ChevronRight, HardDrive, Cloud, Compass, User, LogIn, UserPlus, Mail, Lock, Eye, EyeOff, Camera, Upload } from 'lucide-react';
+import { SiOllama } from 'react-icons/si';
+import { FaDocker } from 'react-icons/fa';
+import { HuggingFace } from '@lobehub/icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import DocsModal from './DocsModal';
 
 const Sidebar = ({
   chats,
@@ -27,8 +31,6 @@ const Sidebar = ({
   const [isStartingServer, setIsStartingServer] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
-  const [docsSection, setDocsSection] = useState('about');
-  const [docsDiscoveryExpanded, setDocsDiscoveryExpanded] = useState(true);
   const { theme, isDark } = useTheme();
   const { user, isLoggedIn, login, register, logout } = useAuth();
   
@@ -501,14 +503,14 @@ const Sidebar = ({
         borderRadius: '6px',
         marginBottom: '8px'
       }}>
-        <div style={{
-          width: '6px',
-          height: '6px',
-          borderRadius: '50%',
-          background: ollamaStatus === 'running' ? theme.success : isStartingServer ? theme.warning : theme.error,
-          boxShadow: ollamaStatus === 'running' ? `0 0 4px ${theme.success}` : 'none',
-          animation: isStartingServer ? 'pulse 1s infinite' : 'none'
-        }} />
+        <SiOllama 
+          size={14} 
+          style={{
+            fill: ollamaStatus === 'running' ? theme.success : isStartingServer ? theme.warning : theme.error,
+            opacity: isStartingServer ? 0.6 : 1,
+            animation: isStartingServer ? 'pulse 1s infinite' : 'none'
+          }}
+        />
         <span style={{ flex: 1 }}>
           {ollamaStatus === 'running' 
             ? 'Ollama Connected' 
@@ -777,12 +779,11 @@ const Sidebar = ({
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'rgba(0,0,0,0.7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10000,
-            backdropFilter: 'blur(2px)',
           }}
         >
           <div
@@ -959,12 +960,11 @@ const Sidebar = ({
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'rgba(0,0,0,0.7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10000,
-            backdropFilter: 'blur(2px)',
           }}
         >
           <div
@@ -1120,7 +1120,9 @@ const Sidebar = ({
                 </label>
                 
                 {/* HuggingFace */}
-                <div style={{ marginBottom: '10px', fontSize: '0.8rem', color: theme.textMuted }}>HuggingFace</div>
+                <div style={{ marginBottom: '10px', fontSize: '0.8rem', color: theme.textMuted }}>
+                  HuggingFace
+                </div>
                 <div style={{ 
                   padding: '14px', background: theme.bgTertiary, borderRadius: '6px',
                   border: `1px solid ${theme.border}`,
@@ -1128,7 +1130,7 @@ const Sidebar = ({
                   {user?.huggingface ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '1rem' }}>🤗</span>
+                        <HuggingFace.Color size={18} />
                         <span style={{ color: theme.text, fontSize: '0.9rem' }}>{user.huggingface.username}</span>
                       </div>
                       <button
@@ -1272,14 +1274,15 @@ const Sidebar = ({
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{
-                        width: '8px', height: '8px', borderRadius: '50%',
-                        background: dockerStatus.checking 
+                      <FaDocker 
+                        size={18} 
+                        color={dockerStatus.checking 
                           ? theme.warning 
                           : dockerStatus.running 
-                            ? theme.success 
-                            : theme.error,
-                      }} />
+                            ? '#22c55e'
+                            : '#ef4444'
+                        } 
+                      />
                       <span style={{ color: theme.text, fontSize: '0.9rem' }}>
                         {dockerStatus.checking 
                           ? 'Checking...' 
@@ -1373,7 +1376,6 @@ const Sidebar = ({
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10001,
-            backdropFilter: 'blur(4px)',
           }}
         >
           <div
@@ -1659,330 +1661,10 @@ const Sidebar = ({
         document.body
       )}
 
-      {/* Docs Modal - rendered via portal to escape stacking context */}
-      {showDocs && createPortal(
-        <div
-          onClick={() => setShowDocs(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            backdropFilter: 'blur(2px)',
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: theme.bg,
-              borderRadius: '8px',
-              width: '900px',
-              maxWidth: '94vw',
-              height: '700px',
-              maxHeight: '90vh',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              border: `1px solid ${theme.border}`,
-              boxShadow: isDark ? '0 16px 48px rgba(0,0,0,0.4)' : '0 16px 48px rgba(0,0,0,0.15)',
-            }}
-          >
-            {/* Header */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '14px 18px',
-              borderBottom: `1px solid ${theme.border}`,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <BookOpen size={20} color={isDark ? '#fff' : '#1a1a1a'} />
-                <h3 style={{ fontSize: '1rem', fontWeight: '600', color: theme.text, margin: 0 }}>
-                  Documentation
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowDocs(false)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: theme.textSecondary,
-                  cursor: 'pointer',
-                  padding: '6px',
-                  borderRadius: '4px',
-                  display: 'flex',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; e.currentTarget.style.background = theme.bgHover; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = theme.textSecondary; e.currentTarget.style.background = 'transparent'; }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Main Content */}
-            <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-              {/* Sidebar */}
-              <div style={{
-                width: '200px',
-                padding: '14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                background: theme.bgSecondary,
-                borderRight: `1px solid ${theme.border}`,
-              }}>
-                {/* About */}
-                <button
-                  onClick={() => setDocsSection('about')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '10px 12px',
-                    background: docsSection === 'about' ? theme.bgActive : 'transparent',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: docsSection === 'about' ? theme.text : theme.textSecondary,
-                    cursor: 'pointer',
-                    fontSize: '0.9rem',
-                    fontWeight: docsSection === 'about' ? '500' : '400',
-                    textAlign: 'left',
-                    width: '100%',
-                  }}
-                  onMouseEnter={(e) => { if (docsSection !== 'about') { e.currentTarget.style.background = theme.bgHover; e.currentTarget.style.color = theme.text; } }}
-                  onMouseLeave={(e) => { if (docsSection !== 'about') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textSecondary; } }}
-                >
-                  <BookOpen size={18} />
-                  About
-                </button>
-
-                {/* OpenMind Create Dropdown */}
-                <div>
-                  <button
-                    onClick={() => setDocsDiscoveryExpanded(!docsDiscoveryExpanded)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      width: '100%',
-                      padding: '10px 12px',
-                      background: (docsSection === 'local' || docsSection === 'cloud') ? theme.bgActive : 'transparent',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: (docsSection === 'local' || docsSection === 'cloud') ? theme.text : theme.textSecondary,
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                      fontWeight: '500',
-                      textAlign: 'left',
-                    }}
-                    onMouseEnter={(e) => { if (docsSection !== 'local' && docsSection !== 'cloud') { e.currentTarget.style.background = theme.bgHover; e.currentTarget.style.color = theme.text; } }}
-                    onMouseLeave={(e) => { if (docsSection !== 'local' && docsSection !== 'cloud') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textSecondary; } }}
-                  >
-                    <Zap size={18} />
-                    <span style={{ flex: 1 }}>OpenMind Create</span>
-                    {docsDiscoveryExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </button>
-
-                  {docsDiscoveryExpanded && (
-                    <div style={{ marginLeft: '12px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <button
-                        onClick={() => setDocsSection('local')}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '8px 12px',
-                          background: docsSection === 'local' ? theme.bgActive : 'transparent',
-                          border: 'none',
-                          borderRadius: '4px',
-                          color: docsSection === 'local' ? theme.text : theme.textSecondary,
-                          cursor: 'pointer',
-                          fontSize: '0.85rem',
-                          textAlign: 'left',
-                          width: '100%',
-                        }}
-                        onMouseEnter={(e) => { if (docsSection !== 'local') { e.currentTarget.style.background = theme.bgHover; e.currentTarget.style.color = theme.text; } }}
-                        onMouseLeave={(e) => { if (docsSection !== 'local') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textSecondary; } }}
-                      >
-                        <HardDrive size={14} />
-                        Local Models
-                      </button>
-                      <button
-                        onClick={() => setDocsSection('cloud')}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '8px 12px',
-                          background: docsSection === 'cloud' ? theme.bgActive : 'transparent',
-                          border: 'none',
-                          borderRadius: '4px',
-                          color: docsSection === 'cloud' ? theme.text : theme.textSecondary,
-                          cursor: 'pointer',
-                          fontSize: '0.85rem',
-                          textAlign: 'left',
-                          width: '100%',
-                        }}
-                        onMouseEnter={(e) => { if (docsSection !== 'cloud') { e.currentTarget.style.background = theme.bgHover; e.currentTarget.style.color = theme.text; } }}
-                        onMouseLeave={(e) => { if (docsSection !== 'cloud') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textSecondary; } }}
-                      >
-                        <Cloud size={14} />
-                        Cloud Models
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Content */}
-              <div style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
-                {docsSection === 'about' && (
-                  <div style={{ color: theme.textSecondary, lineHeight: '1.7' }}>
-                    <h2 style={{ margin: '0 0 16px 0', fontSize: '1.3rem', color: theme.text, fontWeight: '600' }}>
-                      🧠 AI for Everyone
-                    </h2>
-                    <p style={{ margin: '0 0 20px 0' }}>
-                      OpenMind is built with one mission: to make AI accessible to everyone, regardless of technical background or experience level.
-                    </p>
-                    
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      🎯 Our Vision
-                    </h3>
-                    <p style={{ margin: '0 0 20px 0' }}>
-                      Whether you're a complete beginner curious about AI, a student learning to code, a professional looking to boost productivity, or an expert building advanced applications — OpenMind meets you where you are.
-                    </p>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      ✨ Key Features
-                    </h3>
-                    <ul style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-                      <li style={{ marginBottom: '8px' }}>Run AI models locally on your own hardware — no cloud required</li>
-                      <li style={{ marginBottom: '8px' }}>Connect to Ollama, HuggingFace, and local GGUF models</li>
-                      <li style={{ marginBottom: '8px' }}>Create custom AI assistants with OpenMind Create</li>
-                      <li style={{ marginBottom: '8px' }}>Deep Search for intelligent web research</li>
-                      <li style={{ marginBottom: '8px' }}>Privacy-first: your data stays on your machine</li>
-                    </ul>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      🌍 Open Source
-                    </h3>
-                    <p style={{ margin: '0' }}>
-                      OpenMind is open source and community-driven. We believe AI should be transparent, accessible, and controlled by the people who use it.
-                    </p>
-                  </div>
-                )}
-
-                {docsSection === 'local' && (
-                  <div style={{ color: theme.textSecondary, lineHeight: '1.7' }}>
-                    <h2 style={{ margin: '0 0 16px 0', fontSize: '1.3rem', color: theme.text, fontWeight: '600' }}>
-                      <HardDrive size={24} style={{ verticalAlign: 'middle', marginRight: '10px' }} />
-                      Local Models
-                    </h2>
-                    
-                    <div style={{ 
-                      padding: '12px 16px', 
-                      background: isDark ? 'rgba(255,200,0,0.1)' : 'rgba(255,200,0,0.15)', 
-                      borderRadius: '8px', 
-                      marginBottom: '20px',
-                      border: `1px solid ${isDark ? 'rgba(255,200,0,0.2)' : 'rgba(255,200,0,0.3)'}`,
-                    }}>
-                      <span style={{ color: isDark ? '#ffd700' : '#b8860b', fontWeight: '500' }}>🚧 Work in Progress</span>
-                      <p style={{ margin: '8px 0 0 0', fontSize: '0.9rem' }}>
-                        This feature is still being developed. Some functionality may be incomplete.
-                      </p>
-                    </div>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      What are Local Models?
-                    </h3>
-                    <p style={{ margin: '0 0 20px 0' }}>
-                      Local models are AI models that run entirely on your computer. They use GGUF format files which are optimized for running on consumer hardware with llama.cpp.
-                    </p>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      How to Use
-                    </h3>
-                    <ol style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-                      <li style={{ marginBottom: '8px' }}>Open <strong>OpenMind Create</strong> from the sidebar</li>
-                      <li style={{ marginBottom: '8px' }}>Go to <strong>Discovery → Local</strong></li>
-                      <li style={{ marginBottom: '8px' }}>Import a .gguf file or select an existing one</li>
-                      <li style={{ marginBottom: '8px' }}>Configure your model with a custom name and system prompt</li>
-                      <li style={{ marginBottom: '8px' }}>Click <strong>Create Model</strong></li>
-                    </ol>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      Benefits
-                    </h3>
-                    <ul style={{ margin: '0', paddingLeft: '20px' }}>
-                      <li style={{ marginBottom: '8px' }}>🔒 Complete privacy — your data never leaves your machine</li>
-                      <li style={{ marginBottom: '8px' }}>💰 No API costs — run unlimited queries for free</li>
-                      <li style={{ marginBottom: '8px' }}>🌐 Works offline — no internet connection required</li>
-                      <li style={{ marginBottom: '8px' }}>⚡ Fast responses — no network latency</li>
-                    </ul>
-                  </div>
-                )}
-
-                {docsSection === 'cloud' && (
-                  <div style={{ color: theme.textSecondary, lineHeight: '1.7' }}>
-                    <h2 style={{ margin: '0 0 16px 0', fontSize: '1.3rem', color: theme.text, fontWeight: '600' }}>
-                      <Cloud size={24} style={{ verticalAlign: 'middle', marginRight: '10px' }} />
-                      Cloud Models (HuggingFace)
-                    </h2>
-                    
-                    <div style={{ 
-                      padding: '12px 16px', 
-                      background: isDark ? 'rgba(255,200,0,0.1)' : 'rgba(255,200,0,0.15)', 
-                      borderRadius: '8px', 
-                      marginBottom: '20px',
-                      border: `1px solid ${isDark ? 'rgba(255,200,0,0.2)' : 'rgba(255,200,0,0.3)'}`,
-                    }}>
-                      <span style={{ color: isDark ? '#ffd700' : '#b8860b', fontWeight: '500' }}>🚧 Work in Progress</span>
-                      <p style={{ margin: '8px 0 0 0', fontSize: '0.9rem' }}>
-                        This feature is still being developed. Some functionality may be incomplete.
-                      </p>
-                    </div>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      What are Cloud Models?
-                    </h3>
-                    <p style={{ margin: '0 0 20px 0' }}>
-                      Cloud models are hosted on HuggingFace and can be browsed, downloaded, and used directly from OpenMind. This gives you access to thousands of pre-trained models from the community.
-                    </p>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      How to Use
-                    </h3>
-                    <ol style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-                      <li style={{ marginBottom: '8px' }}>Open <strong>OpenMind Create</strong> from the sidebar</li>
-                      <li style={{ marginBottom: '8px' }}>Go to <strong>Discovery → Cloud</strong></li>
-                      <li style={{ marginBottom: '8px' }}>Search for GGUF models or browse popular ones</li>
-                      <li style={{ marginBottom: '8px' }}>Click <strong>View</strong> to see model details and README</li>
-                      <li style={{ marginBottom: '8px' }}>Use the <strong>Download</strong> button to download GGUF files</li>
-                      <li style={{ marginBottom: '8px' }}>Downloaded models appear in your Local models</li>
-                    </ol>
-
-                    <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: theme.text, fontWeight: '600' }}>
-                      Features
-                    </h3>
-                    <ul style={{ margin: '0', paddingLeft: '20px' }}>
-                      <li style={{ marginBottom: '8px' }}>🔍 Search thousands of GGUF models</li>
-                      <li style={{ marginBottom: '8px' }}>📖 View model cards and documentation</li>
-                      <li style={{ marginBottom: '8px' }}>⬇️ Download models directly in-app</li>
-                      <li style={{ marginBottom: '8px' }}>🏷️ Filter by tags, size, and popularity</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Docs Modal */}
+      <DocsModal isOpen={showDocs} onClose={() => setShowDocs(false)} />
     </div>
   );
 };
 
-export default Sidebar;
+export default memo(Sidebar);

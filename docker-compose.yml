@@ -1,9 +1,14 @@
 version: '3.8'
 
+# OpenMind Docker Services
+# Run with: docker-compose up -d
+# Stop with: docker-compose down
+
 services:
+  # SearXNG - Privacy-respecting metasearch engine for Deep Search
   searxng:
     image: searxng/searxng:latest
-    container_name: searxng
+    container_name: openmind-searxng
     ports:
       - "8888:8080"
     volumes:
@@ -11,3 +16,13 @@ services:
     environment:
       - SEARXNG_BASE_URL=http://localhost:8888/
     restart: unless-stopped
+    networks:
+      - openmind-network
+    labels:
+      - "openmind.service=searxng"
+      - "openmind.description=Deep Search Engine"
+
+networks:
+  openmind-network:
+    name: openmind-network
+    driver: bridge

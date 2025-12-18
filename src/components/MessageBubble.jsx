@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Copy, Info, RotateCcw, Check, Image } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,11 +6,15 @@ import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import ChartRenderer from './ChartRenderer';
 
+// Memoize markdown plugins to prevent recreation
+const remarkPlugins = [remarkGfm, remarkBreaks];
+const rehypePlugins = [rehypeHighlight];
+
 /**
  * MessageBubble - Renders a single chat message (user or assistant)
- * Extracted from ChatArea to reduce component size
+ * Memoized for performance - only re-renders when props change
  */
-const MessageBubble = ({
+const MessageBubble = memo(({
   msg,
   index,
   theme,
@@ -571,6 +575,18 @@ const MessageBubble = ({
       </div>
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison for memo - only re-render when necessary
+  return (
+    prevProps.msg.id === nextProps.msg.id &&
+    prevProps.msg.content === nextProps.msg.content &&
+    prevProps.msg.isStreaming === nextProps.msg.isStreaming &&
+    prevProps.isDark === nextProps.isDark &&
+    prevProps.isDeepSearching === nextProps.isDeepSearching &&
+    prevProps.isReasoning === nextProps.isReasoning &&
+    prevProps.imageGenProgress === nextProps.imageGenProgress &&
+    prevProps.expandedReasoning === nextProps.expandedReasoning
+  );
+});
 
 export default MessageBubble;

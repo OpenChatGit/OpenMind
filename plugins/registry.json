@@ -1,0 +1,120 @@
+{
+  "version": "1.1.0",
+  "name": "OpenMind Plugin Store",
+  "description": "Official verified plugins for OpenMind",
+  "pluginNamespace": "teamaiko/openmindlabs-",
+  "pluginLabel": "com.openmind.plugin=true",
+  "plugins": [
+    {
+      "id": "searxng",
+      "name": "SearXNG",
+      "description": "Privacy-respecting metasearch engine for Deep Search. Enables web search capabilities without tracking.",
+      "version": "1.0.0",
+      "author": "OpenMindLabs",
+      "category": "search",
+      "icon": "search",
+      "image": "teamaiko/openmindlabs-searxng:latest",
+      "containerName": "openmind-searxng",
+      "ports": {
+        "8888": "8080"
+      },
+      "webUrl": "http://localhost:8888",
+      "features": ["deep-search", "web-search", "privacy"],
+      "required": false,
+      "official": true,
+      "type": "api",
+      "provides": ["search-api"],
+      "integration": {
+        "endpoint": "http://localhost:8888",
+        "healthCheck": "/healthz",
+        "configKey": "searxng"
+      }
+    },
+    {
+      "id": "ollama-docker",
+      "name": "Ollama (Docker)",
+      "description": "Run LLMs in an isolated Docker container. Alternative to native Ollama installation.",
+      "version": "1.0.0",
+      "author": "Ollama",
+      "category": "ai",
+      "icon": "server",
+      "image": "ollama/ollama",
+      "containerName": "openmind-ollama",
+      "ports": {
+        "11434": "11434"
+      },
+      "features": ["llm", "inference", "gpu"],
+      "required": false,
+      "official": true,
+      "type": "api",
+      "provides": ["llm-api", "ollama-compatible"],
+      "env": {
+        "OLLAMA_HOST": "0.0.0.0"
+      },
+      "volumes": {
+        "ollama-data": "/root/.ollama"
+      },
+      "integration": {
+        "endpoint": "http://localhost:11434",
+        "healthCheck": "/api/tags",
+        "configKey": "ollama"
+      },
+      "tags": [
+        { "tag": "0.13.4", "label": "0.13.4 (CPU)", "description": "Stable version for CPU", "default": true },
+        { "tag": "0.13.4-rocm", "label": "0.13.4 ROCm (AMD GPU)", "description": "Stable version with AMD GPU support" }
+      ]
+    },
+    {
+      "id": "whisper",
+      "name": "Whisper Voice Input",
+      "description": "Speech-to-text voice input using OpenAI Whisper. Hold the microphone button to speak, release to transcribe.",
+      "version": "1.0.0",
+      "author": "OpenMindLabs",
+      "category": "tools",
+      "icon": "mic",
+      "image": "teamaiko/openmindlabs-whisper",
+      "containerName": "openmind-whisper",
+      "ports": {
+        "9000": "9000"
+      },
+      "features": ["voice-input", "speech-to-text", "transcription", "multi-language"],
+      "required": false,
+      "official": true,
+      "type": "api",
+      "provides": ["voice-input", "transcription-api"],
+      "env": {
+        "ASR_MODEL": "base",
+        "ASR_ENGINE": "openai_whisper"
+      },
+      "integration": {
+        "endpoint": "http://localhost:9000",
+        "healthCheck": "/",
+        "configKey": "whisper"
+      },
+      "ui": {
+        "hasUI": true,
+        "pluginUrl": "https://raw.githubusercontent.com/OpenChatGit/OpenMindLabs-Plugins/main/plugins/whisper/",
+        "js": "whisper.js",
+        "css": "whisper.css",
+        "buttons": [
+          {
+            "id": "voice-input",
+            "position": "chat-input",
+            "icon": "mic",
+            "tooltip": "Hold to speak",
+            "holdToActivate": true
+          }
+        ]
+      },
+      "tags": [
+        { "tag": "latest", "label": "Latest (Base Model)", "description": "Base model - good balance of speed and accuracy", "default": true }
+      ]
+    }
+  ],
+  "categories": [
+    { "id": "search", "name": "Search", "icon": "search" },
+    { "id": "ai", "name": "AI & ML", "icon": "brain" },
+    { "id": "database", "name": "Database", "icon": "database" },
+    { "id": "tools", "name": "Tools", "icon": "wrench" }
+  ]
+}

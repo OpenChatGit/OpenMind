@@ -17,7 +17,6 @@ let ollama = null;
 let ollamaManager = null;
 let localLlama = null;
 let openmindModels = null;
-let ptyTerminal = null;
 let searxng = null;
 let training = null;
 
@@ -85,14 +84,6 @@ function getOpenmindModels() {
         console.log(`[TIMING] openmindModels loaded in ${Date.now() - start}ms`);
     }
     return openmindModels;
-}
-function getPtyTerminal() {
-    if (!ptyTerminal) {
-        const start = Date.now();
-        ptyTerminal = require('./ptyTerminal');
-        console.log(`[TIMING] ptyTerminal loaded in ${Date.now() - start}ms`);
-    }
-    return ptyTerminal;
 }
 function getSearxng() {
     if (!searxng) {
@@ -996,24 +987,348 @@ ipcMain.handle('check-docker-status', async () => {
     });
 });
 
-// Get running Docker containers with port mappings
+// Get running Docker containers with port mappings and OpenMind labels
 ipcMain.handle('get-docker-containers', async () => {
     return new Promise((resolve) => {
-        exec('docker ps --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"', { timeout: 10000 }, (error, stdout) => {
+        // Include labels in the format string
+        exec('docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}|{{.Labels}}"', { timeout: 10000 }, (error, stdout) => {
             if (error) {
                 resolve({ success: false, error: error.message, containers: [] });
             } else {
                 const lines = stdout.trim().split('\n').filter(line => line.trim());
                 const containers = lines.map(line => {
-                    const [id, name, image, status, ports] = line.split('|');
+                    const parts = line.split('|');
+                    const [id, name, image, status, ports, state] = parts;
+                    const labels = parts[6] || '';
                     // Parse ports like "0.0.0.0:8080->80/tcp, 0.0.0.0:443->443/tcp"
                     const portMappings = ports ? ports.split(',').map(p => p.trim()).filter(p => p) : [];
-                    return { id, name, image, status, ports: portMappings };
+                    // Check if this is an OpenMind plugin (by label or namespace)
+                    const isOpenMindPlugin = labels.includes('com.openmind.plugin=true') || 
+                                            image.startsWith('teamaiko/openmindlabs-');
+                    return { 
+                        id, 
+                        name, 
+                        image, 
+                        status, 
+                        ports: portMappings, 
+                        state: state || 'unknown',
+                        isOpenMindPlugin
+                    };
                 });
                 resolve({ success: true, containers });
             }
         });
     });
+});
+
+// Start a Docker container
+ipcMain.handle('docker-start-container', async (event, containerId) => {
+    return new Promise((resolve) => {
+        exec(`docker start ${containerId}`, { timeout: 30000 }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+            } else {
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Stop a Docker container
+ipcMain.handle('docker-stop-container', async (event, containerId) => {
+    return new Promise((resolve) => {
+        exec(`docker stop ${containerId}`, { timeout: 30000 }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+            } else {
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Restart a Docker container
+ipcMain.handle('docker-restart-container', async (event, containerId) => {
+    return new Promise((resolve) => {
+        exec(`docker restart ${containerId}`, { timeout: 30000 }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+            } else {
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Remove a Docker container
+ipcMain.handle('docker-remove-container', async (event, containerId) => {
+    return new Promise((resolve) => {
+        exec(`docker rm -f ${containerId}`, { timeout: 30000 }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+            } else {
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Pull and run a Docker container (dynamic plugin support)
+ipcMain.handle('docker-pull-and-run', async (event, { image, name, ports, env, volumes, restart }) => {
+    return new Promise((resolve) => {
+        // First pull the image
+        console.log(`Pulling Docker image: ${image}`);
+        exec(`docker pull ${image}`, { timeout: 300000 }, (pullError) => {
+            if (pullError) {
+                resolve({ success: false, error: `Failed to pull image: ${pullError.message}` });
+                return;
+            }
+            
+            // Build docker run arguments dynamically
+            let args = [];
+            
+            // Port mappings
+            if (ports) {
+                for (const [hostPort, containerPort] of Object.entries(ports)) {
+                    args.push(`-p ${hostPort}:${containerPort}`);
+                }
+            }
+            
+            // Environment variables
+            if (env) {
+                for (const [key, value] of Object.entries(env)) {
+                    args.push(`-e ${key}="${value}"`);
+                }
+            }
+            
+            // Volume mounts (named volumes for persistence)
+            if (volumes) {
+                for (const [volumeName, containerPath] of Object.entries(volumes)) {
+                    // Use named volumes for better management
+                    args.push(`-v openmind-${volumeName}:${containerPath}`);
+                }
+            }
+            
+            // Restart policy (default: unless-stopped for plugins)
+            const restartPolicy = restart || 'unless-stopped';
+            args.push(`--restart ${restartPolicy}`);
+            
+            // Add OpenMind plugin label for identification
+            args.push('--label com.openmind.plugin=true');
+            
+            // Run the container
+            const runCmd = `docker run -d --name ${name} ${args.join(' ')} ${image}`;
+            console.log(`Running container: ${runCmd}`);
+            
+            exec(runCmd, { timeout: 60000 }, (runError) => {
+                if (runError) {
+                    resolve({ success: false, error: `Failed to run container: ${runError.message}` });
+                } else {
+                    resolve({ success: true });
+                }
+            });
+        });
+    });
+});
+
+// Start a service using docker-compose
+ipcMain.handle('docker-compose-up', async (event, serviceName) => {
+    return new Promise((resolve) => {
+        const appPath = app.isPackaged 
+            ? path.dirname(app.getPath('exe'))
+            : path.join(__dirname, '..');
+        
+        // Run docker-compose up for the specific service
+        const composeCmd = `docker-compose -f "${path.join(appPath, 'docker-compose.yml')}" up -d ${serviceName}`;
+        
+        exec(composeCmd, { timeout: 300000, cwd: appPath }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Docker compose error:', error.message);
+                resolve({ success: false, error: error.message });
+            } else {
+                console.log('Docker compose output:', stdout);
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Stop a service using docker-compose
+ipcMain.handle('docker-compose-down', async (event, serviceName) => {
+    return new Promise((resolve) => {
+        const appPath = app.isPackaged 
+            ? path.dirname(app.getPath('exe'))
+            : path.join(__dirname, '..');
+        
+        const composeCmd = serviceName 
+            ? `docker-compose -f "${path.join(appPath, 'docker-compose.yml')}" stop ${serviceName}`
+            : `docker-compose -f "${path.join(appPath, 'docker-compose.yml')}" down`;
+        
+        exec(composeCmd, { timeout: 60000, cwd: appPath }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message });
+            } else {
+                resolve({ success: true });
+            }
+        });
+    });
+});
+
+// Load plugin registry from plugins/registry.json
+ipcMain.handle('load-plugin-registry', async () => {
+    try {
+        const appPath = app.isPackaged 
+            ? path.dirname(app.getPath('exe'))
+            : path.join(__dirname, '..');
+        
+        const registryPath = path.join(appPath, 'plugins', 'registry.json');
+        
+        if (!fs.existsSync(registryPath)) {
+            console.log('Plugin registry not found at:', registryPath);
+            return { success: true, plugins: [], categories: [] };
+        }
+        
+        const registryData = fs.readFileSync(registryPath, 'utf8');
+        const registry = JSON.parse(registryData);
+        
+        console.log(`Loaded ${registry.plugins?.length || 0} plugins from registry`);
+        
+        return {
+            success: true,
+            plugins: registry.plugins || [],
+            categories: registry.categories || [],
+            version: registry.version
+        };
+    } catch (error) {
+        console.error('Error loading plugin registry:', error);
+        return { success: false, error: error.message, plugins: [], categories: [] };
+    }
+});
+
+// Load online plugin registry (from GitHub or fallback to local)
+ipcMain.handle('load-online-plugin-registry', async () => {
+    const https = require('https');
+    
+    // Use GitHub API instead of raw.githubusercontent.com to avoid CDN caching
+    // The API returns fresh data every time
+    const apiUrl = 'https://api.github.com/repos/OpenChatGit/OpenMindLabs-Plugins/contents/registry.json';
+    
+    return new Promise((resolve) => {
+        const request = https.get(apiUrl, { 
+            timeout: 8000,
+            headers: {
+                'User-Agent': 'OpenMind-App',
+                'Accept': 'application/vnd.github.v3.raw', // Get raw content directly
+                'Cache-Control': 'no-cache'
+            }
+        }, (res) => {
+            if (res.statusCode !== 200) {
+                console.log(`GitHub API returned ${res.statusCode}, trying raw URL...`);
+                // Fallback to raw URL with random param
+                fetchFromRaw(resolve);
+                return;
+            }
+            
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const registry = JSON.parse(data);
+                    console.log(`Loaded ${registry.plugins?.length || 0} plugins from GitHub API`);
+                    resolve({
+                        success: true,
+                        plugins: registry.plugins || [],
+                        categories: registry.categories || [],
+                        iconsBaseUrl: registry.iconsBaseUrl || '',
+                        version: registry.version,
+                        source: 'github-api'
+                    });
+                } catch (err) {
+                    console.error('Failed to parse GitHub API response:', err);
+                    fetchFromRaw(resolve);
+                }
+            });
+        });
+        
+        request.on('error', (err) => {
+            console.log('GitHub API error, trying raw URL:', err.message);
+            fetchFromRaw(resolve);
+        });
+        
+        request.on('timeout', () => {
+            request.destroy();
+            console.log('GitHub API timeout, trying raw URL');
+            fetchFromRaw(resolve);
+        });
+    });
+    
+    // Fallback to raw.githubusercontent.com with cache-busting
+    function fetchFromRaw(resolve) {
+        const https = require('https');
+        const timestamp = Date.now();
+        const randomStr = Math.random().toString(36).substring(7);
+        const rawUrl = `https://raw.githubusercontent.com/OpenChatGit/OpenMindLabs-Plugins/main/registry.json?nocache=${timestamp}-${randomStr}`;
+        
+        const request = https.get(rawUrl, { timeout: 5000 }, (res) => {
+            if (res.statusCode !== 200) {
+                console.log('Raw URL failed, using local registry');
+                loadLocalRegistry(resolve);
+                return;
+            }
+            
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const registry = JSON.parse(data);
+                    console.log(`Loaded ${registry.plugins?.length || 0} plugins from raw URL`);
+                    resolve({
+                        success: true,
+                        plugins: registry.plugins || [],
+                        categories: registry.categories || [],
+                        iconsBaseUrl: registry.iconsBaseUrl || '',
+                        version: registry.version,
+                        source: 'raw-github'
+                    });
+                } catch (err) {
+                    console.error('Failed to parse raw registry:', err);
+                    loadLocalRegistry(resolve);
+                }
+            });
+        });
+        
+        request.on('error', () => loadLocalRegistry(resolve));
+        request.on('timeout', () => { request.destroy(); loadLocalRegistry(resolve); });
+    }
+    
+    function loadLocalRegistry(resolve) {
+        try {
+            const appPath = app.isPackaged 
+                ? path.dirname(app.getPath('exe'))
+                : path.join(__dirname, '..');
+            
+            const registryPath = path.join(appPath, 'plugins', 'registry.json');
+            
+            if (!fs.existsSync(registryPath)) {
+                resolve({ success: true, plugins: [], categories: [], source: 'none' });
+                return;
+            }
+            
+            const registryData = fs.readFileSync(registryPath, 'utf8');
+            const registry = JSON.parse(registryData);
+            
+            resolve({
+                success: true,
+                plugins: registry.plugins || [],
+                categories: registry.categories || [],
+                version: registry.version,
+                source: 'local'
+            });
+        } catch (error) {
+            console.error('Error loading local registry:', error);
+            resolve({ success: false, error: error.message, plugins: [], categories: [] });
+        }
+    }
 });
 
 // Model Creator - Create custom Ollama models
@@ -1373,32 +1688,46 @@ ipcMain.handle('save-settings', async (event, settings) => {
         return { success: false, error: error.message };
     }
 });
+// ============ Whisper ASR IPC Handler ============
 
-// ============ PTY Terminal IPC Handlers ============
-
-// Create/start PTY terminal
-ipcMain.handle('pty-create', async (event, options = {}) => {
-    return getPtyTerminal().createPty(mainWindow, options);
-});
-
-// Write to PTY (user input)
-ipcMain.handle('pty-write', async (event, data) => {
-    return getPtyTerminal().writeToPty(data);
-});
-
-// Resize PTY
-ipcMain.handle('pty-resize', async (event, { cols, rows }) => {
-    return getPtyTerminal().resizePty(cols, rows);
-});
-
-// Kill PTY
-ipcMain.handle('pty-kill', async () => {
-    return getPtyTerminal().killPty();
-});
-
-// Get PTY status
-ipcMain.handle('pty-status', async () => {
-    return getPtyTerminal().getPtyInfo();
+ipcMain.handle('whisper-transcribe', async (event, { audioData, mimeType, endpoint }) => {
+    try {
+        const FormData = require('form-data');
+        const fetch = require('node-fetch');
+        
+        // Convert base64 to buffer
+        const audioBuffer = Buffer.from(audioData, 'base64');
+        
+        // Create form data
+        const form = new FormData();
+        const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
+        form.append('audio_file', audioBuffer, {
+            filename: `recording.${ext}`,
+            contentType: mimeType
+        });
+        
+        const url = `${endpoint}/asr?output=json`;
+        console.log('[Whisper] Sending request to:', url);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders()
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('[Whisper] Transcription result:', result);
+            return { success: true, text: result.text || result.transcription || result.transcript || '' };
+        } else {
+            const errorText = await response.text();
+            console.error('[Whisper] API error:', response.status, errorText);
+            return { success: false, error: `API error: ${response.status}` };
+        }
+    } catch (error) {
+        console.error('[Whisper] Error:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 // ============ Auth IPC Handlers ============
@@ -1480,8 +1809,6 @@ ipcMain.handle('training-check-status', async (event, { jobId, hfToken }) => {
 
 app.on('window-all-closed', async () => {
     // Kill PTY terminal (only if loaded)
-    if (ptyTerminal) getPtyTerminal().killPty();
-    
     // Close DeepSearch browser (only if loaded)
     if (deepSearch) await getDeepSearch().closeBrowser();
     
@@ -1494,11 +1821,6 @@ app.on('window-all-closed', async () => {
     if (process.platform !== 'darwin') {
         app.quit();
     }
-});
-
-// Also kill PTY on before-quit to ensure cleanup
-app.on('before-quit', () => {
-    if (ptyTerminal) getPtyTerminal().killPty();
 });
 
 

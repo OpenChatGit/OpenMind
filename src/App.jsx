@@ -175,34 +175,32 @@ const App = ({ onReady }) => {
     }
   }, []);
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     const newChat = { id: Date.now(), name: 'New Chat', messages: [] };
-    setChats([newChat, ...chats]);
+    setChats(prev => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     persistChat(newChat);
     return newChat.id;
-  };
+  }, [persistChat]);
 
-  const handleDeleteChat = async (id) => {
-    setChats(chats.filter(c => c.id !== id));
-    if (activeChatId === id) {
-      setActiveChatId(null);
-    }
+  const handleDeleteChat = useCallback(async (id) => {
+    setChats(prev => prev.filter(c => c.id !== id));
+    setActiveChatId(prev => prev === id ? null : prev);
     if (window.electronAPI?.deleteChat) {
       await window.electronAPI.deleteChat(id);
     }
-  };
+  }, []);
 
-  const handleRenameChat = (id, newName) => {
+  const handleRenameChat = useCallback((id, newName) => {
     setChats(prev => {
       const updated = prev.map(c => c.id === id ? { ...c, name: newName } : c);
       const chat = updated.find(c => c.id === id);
       if (chat) persistChat(chat);
       return updated;
     });
-  };
+  }, [persistChat]);
 
-  const handleUpdateMessages = (chatId, messages) => {
+  const handleUpdateMessages = useCallback((chatId, messages) => {
     setChats(prev => {
       const updated = prev.map(c => c.id === chatId ? { ...c, messages } : c);
       const chat = updated.find(c => c.id === chatId);
@@ -213,9 +211,9 @@ const App = ({ onReady }) => {
       }
       return updated;
     });
-  };
+  }, [persistChat]);
 
-  const handleFirstMessage = (firstMessage, initialMessages) => {
+  const handleFirstMessage = useCallback((firstMessage, initialMessages) => {
     const chatName = firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
     const newChatId = Date.now();
     const newChat = { id: newChatId, name: chatName, messages: initialMessages || [] };
@@ -223,11 +221,11 @@ const App = ({ onReady }) => {
     setActiveChatId(newChatId);
     // Don't persist yet - wait for streaming to complete
     return newChatId;
-  };
+  }, []);
 
-  const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen);
-  };
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen(prev => !prev);
+  }, []);
 
   const activeChat = chats.find(c => c.id === activeChatId);
 

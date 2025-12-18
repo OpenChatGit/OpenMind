@@ -73,6 +73,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Docker API
     checkDockerStatus: () => ipcRenderer.invoke('check-docker-status'),
     getDockerContainers: () => ipcRenderer.invoke('get-docker-containers'),
+    dockerStartContainer: (containerId) => ipcRenderer.invoke('docker-start-container', containerId),
+    dockerStopContainer: (containerId) => ipcRenderer.invoke('docker-stop-container', containerId),
+    dockerRestartContainer: (containerId) => ipcRenderer.invoke('docker-restart-container', containerId),
+    dockerRemoveContainer: (containerId) => ipcRenderer.invoke('docker-remove-container', containerId),
+    dockerPullAndRun: (options) => ipcRenderer.invoke('docker-pull-and-run', options),
+    dockerComposeUp: (serviceName) => ipcRenderer.invoke('docker-compose-up', serviceName),
+    dockerComposeDown: (serviceName) => ipcRenderer.invoke('docker-compose-down', serviceName),
+    loadPluginRegistry: () => ipcRenderer.invoke('load-plugin-registry'),
+    loadOnlinePluginRegistry: () => ipcRenderer.invoke('load-online-plugin-registry'),
     
     // Chat Persistence API
     loadChats: () => ipcRenderer.invoke('load-chats'),
@@ -115,23 +124,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searchHfInferenceModels: (query) => ipcRenderer.invoke('hf-search-inference-models', query),
     sendHfMessage: (model, messages) => ipcRenderer.invoke('send-hf-message', { model, messages }),
     
-    // PTY Terminal API (real terminal via node-pty)
-    ptyCreate: (options) => ipcRenderer.invoke('pty-create', options),
-    ptyWrite: (data) => ipcRenderer.invoke('pty-write', data),
-    ptyResize: (cols, rows) => ipcRenderer.invoke('pty-resize', { cols, rows }),
-    ptyKill: () => ipcRenderer.invoke('pty-kill'),
-    ptyStatus: () => ipcRenderer.invoke('pty-status'),
-    onPtyData: (callback) => ipcRenderer.on('pty-data', (event, data) => callback(data)),
-    onPtyExit: (callback) => ipcRenderer.on('pty-exit', (event, data) => callback(data)),
-    removePtyListeners: () => {
-        ipcRenderer.removeAllListeners('pty-data');
-        ipcRenderer.removeAllListeners('pty-exit');
-    },
-    
     // SearXNG Web Search API
     searxngSearch: (query, options) => ipcRenderer.invoke('searxng:search', query, options),
     searxngStatus: () => ipcRenderer.invoke('searxng:status'),
     searxngCategories: () => ipcRenderer.invoke('searxng:categories'),
+    
+    // Whisper ASR API
+    whisperTranscribe: (audioData, mimeType, endpoint) => 
+        ipcRenderer.invoke('whisper-transcribe', { audioData, mimeType, endpoint }),
     
     // Auth API (Local account system)
     authRegister: (email, password, name) => ipcRenderer.invoke('auth-register', { email, password, name }),
