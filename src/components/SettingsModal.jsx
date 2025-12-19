@@ -1,14 +1,30 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  X, Eye, Settings, Info,
-  Sun, Moon, Type, Contrast, Zap, ZapOff, Check, AlertCircle
+  X, Eye, Settings, Info, Puzzle, Code2, ChevronDown,
+  Sun, Moon, Type, Contrast, Zap, ZapOff, Check, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { FaDocker } from 'react-icons/fa';
 import { SiOllama } from 'react-icons/si';
 import { HuggingFace } from '@lobehub/icons';
 import { useTheme, colorblindModes } from '../contexts/ThemeContext';
-import DockerSettings from './DockerSettings';
+
+// Lazy load heavy components to improve initial render
+const DockerSettings = lazy(() => import('./DockerSettings'));
+const APIPlugins = lazy(() => import('./APIPlugins'));
+
+// Loading fallback component
+const TabLoader = ({ theme }) => (
+  <div style={{ 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    padding: '60px',
+    color: theme.textSecondary,
+  }}>
+    <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite' }} />
+  </div>
+);
 
 // Toggle Switch Component
 const ToggleSwitch = ({ enabled, onChange, theme, isDark }) => (
@@ -359,10 +375,18 @@ const AboutSettings = ({ theme }) => {
   );
 };
 
-// Navigation items
+// Navigation items with sub-items for Plugins
 const navItems = [
   { id: 'general', label: 'General', icon: Settings },
-  { id: 'docker', label: 'Docker', icon: FaDocker },
+  { 
+    id: 'plugins', 
+    label: 'Plugins', 
+    icon: Puzzle,
+    subItems: [
+      { id: 'docker-plugins', label: 'Docker Plugins', icon: FaDocker },
+      { id: 'api-plugins', label: 'API Plugins', icon: Code2 },
+    ]
+  },
   { id: 'accessibility', label: 'Accessibility', icon: Eye },
   { id: 'about', label: 'About', icon: Info },
 ];
@@ -371,13 +395,23 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
   const { theme, isDark } = useTheme();
   const [activeSection, setActiveSection] = useState('general');
   const [localSettings, setLocalSettings] = useState({ ...settings });
+  const [expandedMenus, setExpandedMenus] = useState({}); // Track expanded dropdown menus
 
   useEffect(() => {
     if (isOpen) {
       setLocalSettings({ ...settings });
       setActiveSection('general');
+      setExpandedMenus({});
     }
   }, [isOpen, settings]);
+
+  // Toggle dropdown menu
+  const toggleMenu = (menuId) => {
+    setExpandedMenus(prev => ({
+      ...prev,
+      [menuId]: !prev[menuId]
+    }));
+  };
 
   const handleSave = () => {
     onSaveSettings(localSettings);
@@ -385,10 +419,20 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
   };
 
   // Memoize content to prevent unnecessary re-renders
+  // Heavy components (Docker, API Plugins) are lazy loaded
   const content = useMemo(() => {
     switch (activeSection) {
       case 'general': return <GeneralSettings theme={theme} isDark={isDark} />;
-      case 'docker': return <DockerSettings theme={theme} isDark={isDark} />;
+      case 'docker-plugins': return (
+        <Suspense fallback={<TabLoader theme={theme} />}>
+          <DockerSettings theme={theme} isDark={isDark} embedded />
+        </Suspense>
+      );
+      case 'api-plugins': return (
+        <Suspense fallback={<TabLoader theme={theme} />}>
+          <APIPlugins theme={theme} isDark={isDark} />
+        </Suspense>
+      );
       case 'accessibility': return <AccessibilitySettings />;
       case 'about': return <AboutSettings theme={theme} />;
       default: return null;
@@ -458,27 +502,83 @@ const SettingsModal = ({ isOpen, onClose, settings, onSaveSettings }) => {
           }}>
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeSection === item.id;
+              const hasSubItems = item.subItems && item.subItems.length > 0;
+              const isExpanded = expandedMenus[item.id];
+              const isActive = activeSection === item.id || (hasSubItems && item.subItems.some(sub => sub.id === activeSection));
+              
               return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveSection(item.id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '10px 12px',
-                    background: isActive ? theme.bgActive : 'transparent',
-                    border: 'none', borderRadius: '6px',
-                    color: isActive ? theme.text : theme.textSecondary,
-                    cursor: 'pointer', fontSize: '0.9rem',
-                    fontWeight: isActive ? '500' : '400',
-                    textAlign: 'left', transition: 'all 0.2s', width: '100%',
-                  }}
-                  onMouseEnter={(e) => !isActive && (e.currentTarget.style.background = theme.bgHover, e.currentTarget.style.color = theme.text)}
-                  onMouseLeave={(e) => !isActive && (e.currentTarget.style.background = 'transparent', e.currentTarget.style.color = theme.textSecondary)}
-                >
-                  <Icon size={18} />
-                  {item.label}
-                </button>
+                <div key={item.id}>
+                  {/* Main nav item */}
+                  <button
+                    onClick={() => {
+                      if (hasSubItems) {
+                        toggleMenu(item.id);
+                      } else {
+                        setActiveSection(item.id);
+                      }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '10px 12px',
+                      background: isActive && !hasSubItems ? theme.bgActive : 'transparent',
+                      border: 'none', borderRadius: '6px',
+                      color: isActive ? theme.text : theme.textSecondary,
+                      cursor: 'pointer', fontSize: '0.9rem',
+                      fontWeight: isActive ? '500' : '400',
+                      textAlign: 'left', transition: 'all 0.2s', width: '100%',
+                    }}
+                    onMouseEnter={(e) => !(isActive && !hasSubItems) && (e.currentTarget.style.background = theme.bgHover, e.currentTarget.style.color = theme.text)}
+                    onMouseLeave={(e) => !(isActive && !hasSubItems) && (e.currentTarget.style.background = 'transparent', e.currentTarget.style.color = isActive ? theme.text : theme.textSecondary)}
+                  >
+                    <Icon size={18} />
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {hasSubItems && (
+                      <ChevronDown 
+                        size={14} 
+                        style={{ 
+                          transition: 'transform 0.2s',
+                          transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'
+                        }} 
+                      />
+                    )}
+                  </button>
+                  
+                  {/* Sub-items dropdown */}
+                  {hasSubItems && (
+                    <div style={{
+                      overflow: 'hidden',
+                      maxHeight: isExpanded ? `${item.subItems.length * 44}px` : '0px',
+                      transition: 'max-height 0.2s ease-in-out',
+                    }}>
+                      {item.subItems.map((subItem) => {
+                        const SubIcon = subItem.icon;
+                        const isSubActive = activeSection === subItem.id;
+                        return (
+                          <button
+                            key={subItem.id}
+                            onClick={() => setActiveSection(subItem.id)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '10px',
+                              padding: '8px 12px 8px 36px',
+                              background: isSubActive ? theme.bgActive : 'transparent',
+                              border: 'none', borderRadius: '6px',
+                              color: isSubActive ? theme.text : theme.textSecondary,
+                              cursor: 'pointer', fontSize: '0.85rem',
+                              fontWeight: isSubActive ? '500' : '400',
+                              textAlign: 'left', transition: 'all 0.2s', width: '100%',
+                              marginTop: '2px',
+                            }}
+                            onMouseEnter={(e) => !isSubActive && (e.currentTarget.style.background = theme.bgHover, e.currentTarget.style.color = theme.text)}
+                            onMouseLeave={(e) => !isSubActive && (e.currentTarget.style.background = 'transparent', e.currentTarget.style.color = theme.textSecondary)}
+                          >
+                            <SubIcon size={16} />
+                            {subItem.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

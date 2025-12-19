@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Paperclip, ArrowUp, ChevronDown, Radar, Image, Mic, Loader2 } from 'lucide-react';
+import { Paperclip, ArrowUp, ChevronDown, Radar, Mic, Loader2, Volume2, VolumeX } from 'lucide-react';
 import MessageBubble from './MessageBubble';
+import ImageGenButton from './ImageGenButton';
 import { useTheme } from '../contexts/ThemeContext';
-import { useModelManager, useImageGeneration, useDeepSearch } from '../hooks';
+import { useModelManager, useDeepSearchPlugin, useImageGenPlugin } from '../hooks';
 
 const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, inferenceSettings, currentUser }) => {
   const { theme, isDark } = useTheme();
@@ -16,17 +17,21 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     fetchModels, hasValidModel
   } = useModelManager();
   
-  // Use extracted hooks for image generation
+  // Image Generation Plugin (optional - only active when plugin is enabled)
   const {
-    imageGenEnabled, setImageGenEnabled,
-    isGeneratingImage, setIsGeneratingImage,
-    diffusionModels, setDiffusionModels,
-    selectedImageModel, setSelectedImageModel,
-    imageGenProgress, setImageGenProgress,
-    handleGenerateImage, loadDiffusionModels
-  } = useImageGeneration();
+    enabled: imageGenEnabled,
+    setEnabled: setImageGenEnabled,
+    isGenerating: isGeneratingImage,
+    models: diffusionModels,
+    selectedModel: selectedImageModel,
+    selectModel: setSelectedImageModel,
+    progress: imageGenProgress,
+    generate: handleGenerateImage,
+    loadModels: loadDiffusionModels,
+    pluginLoaded: imageGenPluginLoaded,
+  } = useImageGenPlugin();
   
-  // Use extracted hooks for DeepSearch
+  // DeepSearch Plugin (optional - only active when plugin is enabled)
   const {
     deepSearchEnabled, setDeepSearchEnabled,
     isDeepSearching, setIsDeepSearching,
@@ -38,8 +43,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     currentSources, setCurrentSources,
     currentPreviews, setCurrentPreviews,
     currentToolCalls, setCurrentToolCalls,
-    resetDeepSearchState, clearTempState
-  } = useDeepSearch();
+    resetDeepSearchState, clearTempState,
+    pluginLoaded: deepSearchPluginLoaded,
+  } = useDeepSearchPlugin();
   
   const [expandedReasoning, setExpandedReasoning] = useState({});
   const [expandedToolCalls, setExpandedToolCalls] = useState({});
@@ -47,13 +53,26 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   const [fullscreenImage, setFullscreenImage] = useState(null); // Fullscreen image modal
   const [downloadProgress, setDownloadProgress] = useState(0); // 0-100 for glow effect
   
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false);
+  // Voice Chat Mode state
+  const [voiceChatMode, setVoiceChatMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [whisperAvailable, setWhisperAvailable] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const recordingStartRef = useRef(null);
+  const silenceTimeoutRef = useRef(null);
+  const voiceChatActiveRef = useRef(false); // Track if voice chat should continue after AI response
+
+  // TTS state (AI voice)
+  const [ttsEnabled, setTtsEnabled] = useState(() => {
+    const saved = localStorage.getItem('tts-enabled');
+    return saved === 'true';
+  });
+  const [ttsAvailable, setTtsAvailable] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const ttsQueueRef = useRef([]);
+  const ttsAudioRef = useRef(null);
+  const lastSpokenIndexRef = useRef(0);
 
   // Zoom level for accessibility (Ctrl + scroll wheel)
   const [zoomLevel, setZoomLevel] = useState(() => {
@@ -67,36 +86,120 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
   
   const isNewChat = !activeChatId || messages.length === 0;
 
-  // Check if Whisper container is running
+  // Check for available voice plugins (STT and TTS)
   useEffect(() => {
-    const checkWhisper = async () => {
+    const checkVoicePlugins = async () => {
       try {
         const dockerStatus = await window.electronAPI?.checkDockerStatus();
         if (!dockerStatus?.running) {
           setWhisperAvailable(false);
+          setTtsAvailable(false);
           return;
         }
         
         const result = await window.electronAPI?.getDockerContainers();
         if (result?.success) {
-          const whisperRunning = result.containers?.some(c => 
-            c.name?.includes('openmind-whisper') && c.state === 'running'
+          const containers = result.containers || [];
+          
+          // Check for any STT plugin (whisper or any stt-api provider)
+          const sttRunning = containers.some(c => 
+            (c.name?.includes('openmind-whisper') || c.name?.includes('openmind-stt')) && 
+            c.state === 'running'
           );
-          setWhisperAvailable(whisperRunning);
+          setWhisperAvailable(sttRunning);
+          
+          // Check for any TTS plugin (coqui, piper, or any tts-api provider)
+          const ttsRunning = containers.some(c => 
+            (c.name?.includes('openmind-tts') || c.name?.includes('openmind-coqui') || c.name?.includes('openmind-piper')) && 
+            c.state === 'running'
+          );
+          setTtsAvailable(ttsRunning);
         }
       } catch {
         setWhisperAvailable(false);
+        setTtsAvailable(false);
       }
     };
     
-    checkWhisper();
-    const interval = setInterval(checkWhisper, 10000);
+    checkVoicePlugins();
+    const interval = setInterval(checkVoicePlugins, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Voice recording handlers
-  const startRecording = useCallback(async () => {
-    if (isRecording || !whisperAvailable) return;
+  // Save TTS preference
+  useEffect(() => {
+    localStorage.setItem('tts-enabled', ttsEnabled.toString());
+  }, [ttsEnabled]);
+
+  // TTS speak function - speaks text and manages queue (uses generic plugin API)
+  const speakText = useCallback(async (text) => {
+    if (!ttsAvailable || !ttsEnabled || !text.trim()) return;
+    
+    try {
+      // Use generic plugin TTS API - works with any tts-api plugin
+      const result = await window.electronAPI?.pluginTtsSpeak?.(text) 
+        || await window.electronAPI?.ttsSpeak?.(text, 'http://localhost:5002');
+      
+      if (result?.success && result.audio) {
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(result.audio), c => c.charCodeAt(0))],
+          { type: result.mimeType || 'audio/wav' }
+        );
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        return new Promise((resolve) => {
+          const audio = new Audio(audioUrl);
+          ttsAudioRef.current = audio;
+          
+          audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+            ttsAudioRef.current = null;
+            resolve();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(audioUrl);
+            ttsAudioRef.current = null;
+            resolve();
+          };
+          
+          audio.play().catch(() => resolve());
+        });
+      }
+    } catch (err) {
+      console.error('TTS error:', err);
+    }
+  }, [ttsAvailable, ttsEnabled]);
+
+  // Process TTS queue
+  const processTTSQueue = useCallback(async () => {
+    if (isSpeaking || ttsQueueRef.current.length === 0) return;
+    
+    setIsSpeaking(true);
+    
+    while (ttsQueueRef.current.length > 0) {
+      const text = ttsQueueRef.current.shift();
+      if (text) {
+        await speakText(text);
+      }
+    }
+    
+    setIsSpeaking(false);
+  }, [isSpeaking, speakText]);
+
+  // Stop TTS
+  const stopTTS = useCallback(() => {
+    ttsQueueRef.current = [];
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current = null;
+    }
+    setIsSpeaking(false);
+    lastSpokenIndexRef.current = 0;
+  }, []);
+
+  // Voice Chat Mode - Start listening
+  const startListening = useCallback(async () => {
+    if (isListening || !whisperAvailable || isTranscribing) return;
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -108,45 +211,65 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       
       mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
-      recordingStartRef.current = Date.now();
       
       mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+          // Reset silence timeout when audio data comes in
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+          }
+          // Stop after 2 seconds of no new data (silence detection)
+          silenceTimeoutRef.current = setTimeout(() => {
+            if (isListening && audioChunksRef.current.length > 0) {
+              stopListeningAndTranscribe();
+            }
+          }, 2000);
+        }
       };
       
-      mediaRecorderRef.current.start(100);
-      setIsRecording(true);
+      mediaRecorderRef.current.start(500); // Collect data every 500ms
+      setIsListening(true);
+      
+      // Auto-stop after 30 seconds max
+      setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          stopListeningAndTranscribe();
+        }
+      }, 30000);
+      
     } catch (err) {
       console.error('Microphone error:', err);
     }
-  }, [isRecording, whisperAvailable]);
+  }, [isListening, whisperAvailable, isTranscribing]);
 
-  const stopRecording = useCallback(async () => {
-    if (!isRecording || !mediaRecorderRef.current) return;
+  // Stop listening and transcribe
+  const stopListeningAndTranscribe = useCallback(async () => {
+    if (!mediaRecorderRef.current) return;
     
-    const duration = Date.now() - recordingStartRef.current;
-    if (duration < 500) {
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+    }
+    
+    setIsListening(false);
+    
+    if (audioChunksRef.current.length === 0) {
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+      // If voice chat mode is still on, start listening again
+      if (voiceChatActiveRef.current) {
+        setTimeout(() => startListening(), 500);
+      }
       return;
     }
     
-    setIsRecording(false);
     setIsTranscribing(true);
-    
     const mimeType = mediaRecorderRef.current.mimeType;
-    mediaRecorderRef.current.stop();
     
     mediaRecorderRef.current.onstop = async () => {
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-      
-      if (audioChunksRef.current.length === 0) {
-        setIsTranscribing(false);
-        return;
-      }
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
       
       const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      audioChunksRef.current = [];
       
       try {
         const arrayBuffer = await audioBlob.arrayBuffer();
@@ -154,20 +277,58 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
           new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
         );
         
-        const result = await window.electronAPI?.whisperTranscribe(
-          base64Audio, mimeType, 'http://localhost:9000'
-        );
+        // Use generic plugin STT API - works with any stt-api plugin
+        const result = await window.electronAPI?.pluginSttTranscribe?.(base64Audio, mimeType)
+          || await window.electronAPI?.whisperTranscribe?.(base64Audio, mimeType, 'http://localhost:9000');
         
         if (result?.success && result.text?.trim()) {
-          setInput(prev => prev ? `${prev} ${result.text.trim()}` : result.text.trim());
+          // Auto-send the transcribed text
+          const transcribedText = result.text.trim();
+          setInput(transcribedText);
+          // Trigger send after a short delay to let state update
+          setTimeout(() => {
+            handleVoiceSend(transcribedText);
+          }, 100);
+        } else if (voiceChatActiveRef.current) {
+          // No text recognized, start listening again
+          setTimeout(() => startListening(), 500);
         }
       } catch (err) {
         console.error('Transcription error:', err);
+        if (voiceChatActiveRef.current) {
+          setTimeout(() => startListening(), 500);
+        }
       } finally {
         setIsTranscribing(false);
       }
     };
-  }, [isRecording]);
+    
+    mediaRecorderRef.current.stop();
+  }, []);
+
+  // Toggle Voice Chat Mode
+  const toggleVoiceChatMode = useCallback(() => {
+    if (voiceChatMode) {
+      // Turn off
+      voiceChatActiveRef.current = false;
+      setVoiceChatMode(false);
+      setIsListening(false);
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+      }
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+        mediaRecorderRef.current.stop();
+      }
+      stopTTS();
+    } else {
+      // Turn on - also enable TTS
+      voiceChatActiveRef.current = true;
+      setVoiceChatMode(true);
+      setTtsEnabled(true);
+      startListening();
+    }
+  }, [voiceChatMode, startListening, stopTTS]);
 
   // Build system prompt with user context
   const getSystemPrompt = useCallback(() => {
@@ -465,6 +626,162 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     }
   }, []);
 
+  // Voice send - used by voice chat mode, auto-sends and continues listening after response
+  const handleVoiceSend = useCallback(async (text) => {
+    if (!text?.trim() || (!selectedModel || selectedModel === 'No Models Found')) {
+      if (voiceChatActiveRef.current) {
+        setTimeout(() => startListening(), 500);
+      }
+      return;
+    }
+    
+    // Clear input and send
+    setInput('');
+    
+    const userMessage = { 
+      role: 'user', 
+      content: text.trim(), 
+      id: Date.now()
+    };
+
+    let chatId = activeChatId;
+    let currentMessages = [...messages];
+
+    const assistantMessageId = Date.now() + 1;
+    const newMessages = [...currentMessages, userMessage];
+    const messagesWithPlaceholder = [...newMessages, {
+      role: 'assistant',
+      content: '',
+      thinking: '',
+      id: assistantMessageId,
+      isStreaming: true
+    }];
+
+    if (!chatId) {
+      chatId = onFirstMessage(text.trim(), messagesWithPlaceholder);
+    } else {
+      onUpdateMessages(chatId, messagesWithPlaceholder);
+    }
+
+    let currentThinking = '';
+    let currentContent = '';
+    setIsReasoning(true);
+
+    const thinkingListener = (thinking) => {
+      currentThinking = thinking;
+      setIsReasoning(true);
+      onUpdateMessages(chatId, [...newMessages, {
+        role: 'assistant',
+        content: currentContent,
+        thinking: currentThinking,
+        id: assistantMessageId,
+        isStreaming: true
+      }]);
+    };
+
+    const messageListener = (content) => {
+      currentContent = content;
+      if (content) setIsReasoning(false);
+      
+      // TTS for voice chat
+      if (ttsEnabled && ttsAvailable && content) {
+        const sentences = content.match(/[^.!?]+[.!?]+/g) || [];
+        const newSentences = sentences.slice(lastSpokenIndexRef.current);
+        
+        if (newSentences.length > 0) {
+          newSentences.forEach(sentence => {
+            const cleanSentence = sentence
+              .replace(/```[\s\S]*?```/g, '')
+              .replace(/`[^`]+`/g, '')
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+              .replace(/[#*_~]/g, '')
+              .trim();
+            
+            if (cleanSentence.length > 5) {
+              ttsQueueRef.current.push(cleanSentence);
+            }
+          });
+          lastSpokenIndexRef.current = sentences.length;
+          processTTSQueue();
+        }
+      }
+      
+      onUpdateMessages(chatId, [...newMessages, {
+        role: 'assistant',
+        content: currentContent,
+        thinking: currentThinking,
+        id: assistantMessageId,
+        isStreaming: true
+      }]);
+    };
+
+    lastSpokenIndexRef.current = 0;
+    ttsQueueRef.current = [];
+
+    window.electronAPI.onThinkingUpdate(thinkingListener);
+    window.electronAPI.onMessageUpdate(messageListener);
+
+    try {
+      let response;
+      if (deepSearchEnabled) {
+        setIsDeepSearching(true);
+        response = await window.electronAPI.sendDeepSearchMessage(selectedModel, prepareMessagesForAPI(newMessages));
+        setIsDeepSearching(false);
+      } else if (selectedModel.startsWith('⚡ ')) {
+        const modelName = selectedModel.replace('⚡ ', '');
+        response = await window.electronAPI.sendLocalMessage(prepareMessagesForAPI(newMessages), modelName);
+      } else {
+        response = await window.electronAPI.sendOllamaMessage(selectedModel, prepareMessagesForAPI(newMessages));
+      }
+      
+      onUpdateMessages(chatId, [...newMessages, {
+        role: 'assistant',
+        content: currentContent || response.content,
+        thinking: currentThinking || response.thinking,
+        stats: response.stats || {},
+        model: selectedModel,
+        id: assistantMessageId,
+        isStreaming: false
+      }]);
+      
+      setIsReasoning(false);
+      
+      // After AI finishes, wait for TTS to complete then start listening again
+      if (voiceChatActiveRef.current) {
+        const waitForTTS = () => {
+          if (ttsQueueRef.current.length === 0 && !isSpeaking) {
+            setTimeout(() => {
+              if (voiceChatActiveRef.current) {
+                startListening();
+              }
+            }, 500);
+          } else {
+            setTimeout(waitForTTS, 500);
+          }
+        };
+        waitForTTS();
+      }
+      
+    } catch (error) {
+      console.error('Voice chat error:', error);
+      setIsDeepSearching(false);
+      setIsReasoning(false);
+      
+      onUpdateMessages(chatId, [...newMessages, {
+        role: 'assistant',
+        content: 'Error: Could not get response.',
+        thinking: currentThinking,
+        id: assistantMessageId,
+        isStreaming: false
+      }]);
+      
+      // Still try to continue voice chat
+      if (voiceChatActiveRef.current) {
+        setTimeout(() => startListening(), 1000);
+      }
+    }
+  }, [selectedModel, activeChatId, messages, onUpdateMessages, onFirstMessage, deepSearchEnabled, ttsEnabled, ttsAvailable, isSpeaking, processTTSQueue, startListening, prepareMessagesForAPI]);
+
   const handleSend = useCallback(async () => {
     if ((!input.trim() && attachedImages.length === 0) || (!imageGenEnabled && (!selectedModel || selectedModel === 'No Models Found'))) return;
 
@@ -475,8 +792,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
       images: attachedImages.length > 0 ? attachedImages : undefined
     };
 
-    // Image Generation Mode
-    if (imageGenEnabled && input.trim()) {
+    // Image Generation Mode (Plugin-based - only if plugin is loaded and enabled)
+    if (imageGenEnabled && imageGenPluginLoaded && input.trim()) {
       const inputText = input;
       setInput('');
       
@@ -499,18 +816,18 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         onUpdateMessages(chatId, messagesWithPlaceholder);
       }
       
-      const generatedImage = await handleGenerateImage(inputText);
+      const result = await handleGenerateImage(inputText);
       
-      if (generatedImage && !generatedImage.error) {
+      if (result?.success && result.image) {
         onUpdateMessages(chatId, [...newMessages, {
           role: 'assistant',
           content: `Generated image for: "${inputText}"`,
-          generatedImage: generatedImage,
+          generatedImage: result.image,
           id: assistantMessageId,
           isStreaming: false
         }]);
       } else {
-        const errorMsg = generatedImage?.error || 'Unknown error';
+        const errorMsg = result?.error || 'Unknown error';
         let helpText = '';
         if (errorMsg.includes('Missing dependencies') || errorMsg.includes('torch')) {
           helpText = '\n\nInstall required packages:\n```\npip install torch diffusers transformers accelerate\n```';
@@ -569,6 +886,32 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     const messageListener = (content) => {
       currentContent = content;
       if (content) setIsReasoning(false); // Reasoning done when content starts
+      
+      // TTS: Queue complete sentences for speaking
+      if (ttsEnabled && ttsAvailable && content) {
+        // Find sentences that haven't been spoken yet
+        const sentences = content.match(/[^.!?]+[.!?]+/g) || [];
+        const newSentences = sentences.slice(lastSpokenIndexRef.current);
+        
+        if (newSentences.length > 0) {
+          newSentences.forEach(sentence => {
+            // Clean sentence for TTS
+            const cleanSentence = sentence
+              .replace(/```[\s\S]*?```/g, '')
+              .replace(/`[^`]+`/g, '')
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+              .replace(/[#*_~]/g, '')
+              .trim();
+            
+            if (cleanSentence.length > 5) {
+              ttsQueueRef.current.push(cleanSentence);
+            }
+          });
+          lastSpokenIndexRef.current = sentences.length;
+          processTTSQueue();
+        }
+      }
+      
       onUpdateMessages(chatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -577,6 +920,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         isStreaming: true
       }]);
     };
+
+    // Reset TTS state for new message
+    lastSpokenIndexRef.current = 0;
+    ttsQueueRef.current = [];
 
     window.electronAPI.onThinkingUpdate(thinkingListener);
     window.electronAPI.onMessageUpdate(messageListener);
@@ -728,6 +1075,30 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
     const messageListener = (content) => {
       currentContent = content;
       if (content) setIsReasoning(false); // Reasoning done when content starts
+      
+      // TTS: Queue complete sentences for speaking
+      if (ttsEnabled && ttsAvailable && content) {
+        const sentences = content.match(/[^.!?]+[.!?]+/g) || [];
+        const newSentences = sentences.slice(lastSpokenIndexRef.current);
+        
+        if (newSentences.length > 0) {
+          newSentences.forEach(sentence => {
+            const cleanSentence = sentence
+              .replace(/```[\s\S]*?```/g, '')
+              .replace(/`[^`]+`/g, '')
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+              .replace(/[#*_~]/g, '')
+              .trim();
+            
+            if (cleanSentence.length > 5) {
+              ttsQueueRef.current.push(cleanSentence);
+            }
+          });
+          lastSpokenIndexRef.current = sentences.length;
+          processTTSQueue();
+        }
+      }
+      
       onUpdateMessages(activeChatId, [...newMessages, {
         role: 'assistant',
         content: currentContent,
@@ -736,6 +1107,10 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
         isStreaming: true
       }]);
     };
+
+    // Reset TTS state for new message
+    lastSpokenIndexRef.current = 0;
+    ttsQueueRef.current = [];
 
     window.electronAPI.onThinkingUpdate(thinkingListener);
     window.electronAPI.onMessageUpdate(messageListener);
@@ -906,7 +1281,7 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             }}
             onPaste={handlePaste}
             placeholder={
-              imageGenEnabled 
+              (imageGenEnabled && imageGenPluginLoaded)
                 ? "Describe the image you want to generate..." 
                 : (attachedImages.length > 0 ? "Ask about the image(s)..." : "Message AI")
             }
@@ -976,135 +1351,156 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               </span>
             </button>
 
-            {/* DeepSearch Button - expands on hover, rotating glow when active */}
-            <div style={{ 
-              position: 'relative',
-              borderRadius: '20px',
-              padding: isDeepSearching ? '2px' : '0',
-              background: isDeepSearching 
-                ? 'conic-gradient(from var(--angle, 0deg), #ff6b6b, #feca57, #48dbfb, #ff9ff3, #ff6b6b)' 
-                : 'transparent',
-              animation: isDeepSearching ? 'rotate-glow 2s linear infinite' : 'none'
-            }}>
-              <style>
-                {`
-                  @property --angle {
-                    syntax: '<angle>';
-                    initial-value: 0deg;
-                    inherits: false;
-                  }
-                  @keyframes rotate-glow {
-                    from { --angle: 0deg; }
-                    to { --angle: 360deg; }
-                  }
-                `}
-              </style>
-              <button
-                onClick={() => {
-                  const newValue = !deepSearchEnabled;
-                  setDeepSearchEnabled(newValue);
-                }}
-                style={{
-                  background: deepSearchEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isDark ? '#2c2c2e' : '#f3f4f6'),
-                  border: isDeepSearching ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
-                  color: deepSearchEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
-                  cursor: 'pointer',
-                  padding: '6px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0px',
-                  borderRadius: '18px',
-                  fontSize: '0.85rem',
-                  fontWeight: '500',
-                  transition: 'all 0.3s ease',
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => {
-                  if (!deepSearchEnabled) {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                    e.currentTarget.style.color = '#ccc';
-                  }
-                  e.currentTarget.style.gap = '6px';
-                  e.currentTarget.querySelector('.btn-label').style.width = 'auto';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  if (!deepSearchEnabled) {
-                    e.currentTarget.style.background = isDeepSearching ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent';
-                    e.currentTarget.style.color = theme.textSecondary;
-                  }
-                  e.currentTarget.style.gap = '0px';
-                  e.currentTarget.querySelector('.btn-label').style.width = '0';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
-                }}
-              >
-                <Radar size={16} />
-                <span className="btn-label" style={{ 
-                  width: '0', 
-                  opacity: '0', 
-                  overflow: 'hidden', 
-                  transition: 'all 0.3s ease' 
-                }}>DeepSearch</span>
-              </button>
-            </div>
+            {/* DeepSearch Button - only shows when plugin is enabled */}
+            {deepSearchPluginLoaded && (
+              <div style={{ 
+                position: 'relative',
+                borderRadius: '20px',
+                padding: isDeepSearching ? '2px' : '0',
+                background: isDeepSearching 
+                  ? 'conic-gradient(from var(--angle, 0deg), #ff6b6b, #feca57, #48dbfb, #ff9ff3, #ff6b6b)' 
+                  : 'transparent',
+                animation: isDeepSearching ? 'rotate-glow 2s linear infinite' : 'none'
+              }}>
+                <style>
+                  {`
+                    @property --angle {
+                      syntax: '<angle>';
+                      initial-value: 0deg;
+                      inherits: false;
+                    }
+                    @keyframes rotate-glow {
+                      from { --angle: 0deg; }
+                      to { --angle: 360deg; }
+                    }
+                  `}
+                </style>
+                <button
+                  onClick={() => {
+                    const newValue = !deepSearchEnabled;
+                    setDeepSearchEnabled(newValue);
+                  }}
+                  title={deepSearchEnabled ? 'DeepSearch enabled - Click to disable' : 'Enable DeepSearch for web results'}
+                  style={{
+                    background: deepSearchEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isDark ? '#2c2c2e' : '#f3f4f6'),
+                    border: isDeepSearching ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                    color: deepSearchEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
+                    cursor: 'pointer',
+                    padding: '6px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0px',
+                    borderRadius: '18px',
+                    fontSize: '0.85rem',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!deepSearchEnabled) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                      e.currentTarget.style.color = '#ccc';
+                    }
+                    e.currentTarget.style.gap = '6px';
+                    e.currentTarget.querySelector('.btn-label').style.width = 'auto';
+                    e.currentTarget.querySelector('.btn-label').style.opacity = '1';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!deepSearchEnabled) {
+                      e.currentTarget.style.background = isDeepSearching ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent';
+                      e.currentTarget.style.color = theme.textSecondary;
+                    }
+                    e.currentTarget.style.gap = '0px';
+                    e.currentTarget.querySelector('.btn-label').style.width = '0';
+                    e.currentTarget.querySelector('.btn-label').style.opacity = '0';
+                  }}
+                >
+                  <Radar size={16} />
+                  <span className="btn-label" style={{ 
+                    width: '0', 
+                    opacity: '0', 
+                    overflow: 'hidden', 
+                    transition: 'all 0.3s ease' 
+                  }}>DeepSearch</span>
+                </button>
+              </div>
+            )}
 
-            {/* Image Generation Button */}
-            <div style={{ 
-              position: 'relative',
-              borderRadius: '20px',
-              padding: isGeneratingImage ? '2px' : '0',
-              background: isGeneratingImage 
-                ? 'conic-gradient(from var(--angle, 0deg), #ff6b6b, #feca57, #48dbfb, #ff9ff3, #ff6b6b)' 
-                : 'transparent',
-              animation: isGeneratingImage ? 'rotate-glow 2s linear infinite' : 'none'
-            }}>
-              <button
-                onClick={() => setImageGenEnabled(!imageGenEnabled)}
-                style={{
-                  background: imageGenEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isGeneratingImage ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent'),
-                  border: isGeneratingImage ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
-                  color: imageGenEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
-                  cursor: 'pointer',
-                  padding: '6px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0px',
-                  borderRadius: '18px',
-                  fontSize: '0.85rem',
-                  fontWeight: '500',
-                  transition: 'all 0.3s ease',
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => {
-                  if (!imageGenEnabled) {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                    e.currentTarget.style.color = '#ccc';
-                  }
-                  e.currentTarget.style.gap = '6px';
-                  e.currentTarget.querySelector('.btn-label').style.width = 'auto';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  if (!imageGenEnabled) {
-                    e.currentTarget.style.background = isGeneratingImage ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent';
-                    e.currentTarget.style.color = theme.textSecondary;
-                  }
-                  e.currentTarget.style.gap = '0px';
-                  e.currentTarget.querySelector('.btn-label').style.width = '0';
-                  e.currentTarget.querySelector('.btn-label').style.opacity = '0';
-                }}
-              >
-                <Image size={16} />
-                <span className="btn-label" style={{ 
-                  width: '0', 
-                  opacity: '0', 
-                  overflow: 'hidden', 
-                  transition: 'all 0.3s ease' 
-                }}>Generate</span>
-              </button>
-            </div>
+            {/* TTS Voice Button - only shows when TTS container is running and voice chat is off */}
+            {ttsAvailable && !voiceChatMode && (
+              <div style={{ 
+                position: 'relative',
+                borderRadius: '20px',
+                padding: isSpeaking ? '2px' : '0',
+                background: isSpeaking 
+                  ? 'conic-gradient(from var(--angle, 0deg), #4ade80, #22d3ee, #818cf8, #4ade80)' 
+                  : 'transparent',
+                animation: isSpeaking ? 'rotate-glow 2s linear infinite' : 'none'
+              }}>
+                <button
+                  onClick={() => {
+                    if (isSpeaking) {
+                      stopTTS();
+                    } else {
+                      setTtsEnabled(!ttsEnabled);
+                    }
+                  }}
+                  style={{
+                    background: ttsEnabled ? (isDark ? '#fff' : '#1a1a1a') : (isSpeaking ? (isDark ? '#2c2c2e' : '#f3f4f6') : 'transparent'),
+                    border: isSpeaking ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                    color: ttsEnabled ? (isDark ? '#000' : '#fff') : theme.textSecondary,
+                    cursor: 'pointer',
+                    padding: '6px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0px',
+                    borderRadius: '18px',
+                    fontSize: '0.85rem',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!ttsEnabled) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                      e.currentTarget.style.color = '#ccc';
+                    }
+                    e.currentTarget.style.gap = '6px';
+                    e.currentTarget.querySelector('.btn-label').style.width = 'auto';
+                    e.currentTarget.querySelector('.btn-label').style.opacity = '1';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!ttsEnabled) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = theme.textSecondary;
+                    }
+                    e.currentTarget.style.gap = '0px';
+                    e.currentTarget.querySelector('.btn-label').style.width = '0';
+                    e.currentTarget.querySelector('.btn-label').style.opacity = '0';
+                  }}
+                  title={isSpeaking ? 'Stop speaking' : (ttsEnabled ? 'AI Voice enabled' : 'Enable AI Voice')}
+                >
+                  {isSpeaking ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  <span className="btn-label" style={{ 
+                    width: '0', 
+                    opacity: '0', 
+                    overflow: 'hidden', 
+                    transition: 'all 0.3s ease' 
+                  }}>{isSpeaking ? 'Stop' : 'AI Voice'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Image Generation Button - Only shown when plugin is loaded */}
+            {imageGenPluginLoaded && (
+              <ImageGenButton
+                enabled={imageGenEnabled}
+                isGenerating={isGeneratingImage}
+                onToggle={() => setImageGenEnabled(!imageGenEnabled)}
+              />
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -1112,9 +1508,9 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
               <button
                 onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
                 style={{
-                  background: imageGenEnabled ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  border: imageGenEnabled ? '1px solid rgba(255,255,255,0.2)' : 'none',
-                  color: imageGenEnabled ? '#fff' : '#888',
+                  background: (imageGenEnabled && imageGenPluginLoaded) ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  border: (imageGenEnabled && imageGenPluginLoaded) ? '1px solid rgba(255,255,255,0.2)' : 'none',
+                  color: (imageGenEnabled && imageGenPluginLoaded) ? '#fff' : '#888',
                   fontSize: '0.85rem',
                   cursor: 'pointer',
                   display: 'flex',
@@ -1129,11 +1525,11 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                   e.currentTarget.style.color = '#fff';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = imageGenEnabled ? 'rgba(255,255,255,0.08)' : 'transparent';
-                  e.currentTarget.style.color = imageGenEnabled ? '#fff' : '#888';
+                  e.currentTarget.style.background = (imageGenEnabled && imageGenPluginLoaded) ? 'rgba(255,255,255,0.08)' : 'transparent';
+                  e.currentTarget.style.color = (imageGenEnabled && imageGenPluginLoaded) ? '#fff' : '#888';
                 }}
               >
-                {imageGenEnabled ? (selectedImageModel || 'Select Image Model') : (selectedModel || 'Select Model')}
+                {(imageGenEnabled && imageGenPluginLoaded) ? (selectedImageModel || 'Select Image Model') : (selectedModel || 'Select Model')}
                 <ChevronDown size={14} />
               </button>
 
@@ -1159,8 +1555,8 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
                     zIndex: 1000,
                     backdropFilter: 'blur(10px)'
                   }}>
-                    {imageGenEnabled ? (
-                      // Image Generation Models
+                    {(imageGenEnabled && imageGenPluginLoaded) ? (
+                      // Image Generation Models (Plugin)
                       <>
                         {diffusionModels.length > 0 ? (
                           diffusionModels.map(model => (
@@ -1264,44 +1660,54 @@ const ChatArea = ({ activeChatId, messages, onUpdateMessages, onFirstMessage, in
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {/* Voice Input Button - only shows when Whisper is running */}
+              {/* Voice Chat Mode Button - Toggle for continuous voice conversation */}
               {whisperAvailable && (
-                <button
-                  onMouseDown={startRecording}
-                  onMouseUp={stopRecording}
-                  onMouseLeave={stopRecording}
-                  onTouchStart={startRecording}
-                  onTouchEnd={stopRecording}
-                  disabled={isTranscribing}
-                  style={{
-                    background: isRecording 
-                      ? (isDark ? 'white' : '#1a1a1a')
-                      : isTranscribing
-                        ? (isDark ? '#333' : '#e5e5e5')
-                        : 'transparent',
-                    color: isRecording 
-                      ? (isDark ? 'black' : 'white')
-                      : isTranscribing
-                        ? theme.textMuted
-                        : theme.textSecondary,
-                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
-                    borderRadius: '50%',
-                    width: '32px',
-                    height: '32px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: isTranscribing ? 'wait' : 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                  title={isRecording ? 'Recording... Release to stop' : isTranscribing ? 'Transcribing...' : 'Hold to record voice'}
-                >
-                  {isTranscribing ? (
-                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                  ) : (
-                    <Mic size={16} />
-                  )}
-                </button>
+                <div style={{
+                  position: 'relative',
+                  borderRadius: '50%',
+                  padding: (voiceChatMode && isListening) ? '2px' : '0',
+                  background: (voiceChatMode && isListening)
+                    ? 'conic-gradient(from var(--angle, 0deg), #ef4444, #f97316, #eab308, #ef4444)'
+                    : 'transparent',
+                  animation: (voiceChatMode && isListening) ? 'rotate-glow 1.5s linear infinite' : 'none'
+                }}>
+                  <button
+                    onClick={toggleVoiceChatMode}
+                    disabled={isTranscribing}
+                    style={{
+                      background: voiceChatMode 
+                        ? (isDark ? 'white' : '#1a1a1a')
+                        : isTranscribing
+                          ? (isDark ? '#333' : '#e5e5e5')
+                          : 'transparent',
+                      color: voiceChatMode 
+                        ? (isDark ? 'black' : 'white')
+                        : isTranscribing
+                          ? theme.textMuted
+                          : theme.textSecondary,
+                      border: (voiceChatMode && isListening) ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}`,
+                      borderRadius: '50%',
+                      width: '32px',
+                      height: '32px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: isTranscribing ? 'wait' : 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    title={
+                      voiceChatMode 
+                        ? (isListening ? 'Listening... Click to stop voice chat' : isTranscribing ? 'Transcribing...' : 'Voice chat active')
+                        : 'Start voice chat mode'
+                    }
+                  >
+                    {isTranscribing ? (
+                      <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <Mic size={16} />
+                    )}
+                  </button>
+                </div>
               )}
 
               {/* Send Button */}

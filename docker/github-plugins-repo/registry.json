@@ -72,7 +72,7 @@
     {
       "id": "whisper",
       "name": "Whisper Voice Input",
-      "description": "Speech-to-text voice input using OpenAI Whisper. Hold the microphone button to speak, release to transcribe.",
+      "description": "Speech-to-text using OpenAI Whisper. Enables Voice Chat Mode - click the mic button to start a voice conversation with the AI!",
       "version": "1.0.0",
       "author": "OpenMindLabs",
       "category": "tools",
@@ -89,7 +89,7 @@
       "features": ["voice-input", "speech-to-text", "transcription", "multi-language"],
       "official": true,
       "type": "api",
-      "provides": ["voice-input", "transcription-api"],
+      "provides": ["stt-api"],
       "env": {
         "ASR_MODEL": "base",
         "ASR_ENGINE": "openai_whisper"
@@ -116,6 +116,37 @@
       },
       "tags": [
         { "tag": "latest", "label": "Latest (Base Model)", "description": "Base model - good balance of speed and accuracy", "default": true }
+      ]
+    },
+    {
+      "id": "coqui-tts",
+      "name": "Coqui TTS",
+      "description": "Text-to-Speech for AI voice responses. Enables Voice Chat Mode - talk to the AI and hear it respond with natural neural voices!",
+      "version": "1.0.0",
+      "author": "OpenMindLabs",
+      "category": "tools",
+      "icon": "volume-2",
+      "iconUrl": "icons/coqui/speaker_dark.png",
+      "iconUrlDark": "icons/coqui/speaker_dark.png",
+      "iconUrlLight": "icons/coqui/speaker_light.png",
+      "image": "ghcr.io/coqui-ai/tts",
+      "containerName": "openmind-tts",
+      "ports": {
+        "5002": "5002"
+      },
+      "dockerHub": "https://github.com/coqui-ai/TTS",
+      "features": ["text-to-speech", "voice-synthesis", "multi-language", "neural-voices"],
+      "official": true,
+      "comingSoon": true,
+      "type": "api",
+      "provides": ["tts-api"],
+      "integration": {
+        "endpoint": "http://localhost:5002",
+        "healthCheck": "/",
+        "configKey": "coqui-tts"
+      },
+      "tags": [
+        { "tag": "latest", "label": "Latest", "description": "Coqui TTS with Tacotron2 model", "default": true }
       ]
     }
   ],

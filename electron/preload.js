@@ -8,16 +8,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     maximize: () => ipcRenderer.send('maximize-window'),
     close: () => ipcRenderer.send('close-window'),
     
-    // Ollama Server Management (with bundled binary)
-    getOllamaServerStatus: () => ipcRenderer.invoke('get-ollama-server-status'),
-    startOllamaServer: () => ipcRenderer.invoke('start-ollama-server'),
-    stopOllamaServer: () => ipcRenderer.invoke('stop-ollama-server'),
-    downloadOllama: () => ipcRenderer.invoke('download-ollama'),
-    checkOllamaUpdates: () => ipcRenderer.invoke('check-ollama-updates'),
-    onOllamaServerLog: (callback) => ipcRenderer.on('ollama-server-log', (event, log) => callback(log)),
-    onOllamaDownloadProgress: (callback) => ipcRenderer.on('ollama-download-progress', (event, data) => callback(data)),
-    onOllamaInitProgress: (callback) => ipcRenderer.on('ollama-init-progress', (event, data) => callback(data)),
-    
     // Ollama API
     onOllamaStatus: (callback) => ipcRenderer.on('ollama-status', (event, status) => callback(status)),
     onOllamaConnected: (callback) => ipcRenderer.on('ollama-connected', () => callback()),
@@ -30,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     sendDeepSearchMessage: (model, messages) => ipcRenderer.invoke('send-deepsearch-message', { model, messages }),
     executeOllamaCommand: (command) => ipcRenderer.invoke('execute-ollama-command', command),
     onOllamaTerminalProgress: (callback) => ipcRenderer.on('ollama-terminal-progress', (event, data) => callback(data)),
+    ollamaVerboseTest: (model, prompt) => ipcRenderer.invoke('ollama-verbose-test', { model, prompt }),
     
     onThinkingUpdate: (callback) => ipcRenderer.on('ollama-thinking-update', (event, thinking) => callback(thinking)),
     onMessageUpdate: (callback) => ipcRenderer.on('ollama-message-update', (event, message) => callback(message)),
@@ -82,6 +73,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     dockerComposeDown: (serviceName) => ipcRenderer.invoke('docker-compose-down', serviceName),
     loadPluginRegistry: () => ipcRenderer.invoke('load-plugin-registry'),
     loadOnlinePluginRegistry: () => ipcRenderer.invoke('load-online-plugin-registry'),
+    loadAPIPluginRegistry: () => ipcRenderer.invoke('load-api-plugin-registry'),
+    checkInstalledPlugins: () => ipcRenderer.invoke('native-plugins-check-installed'),
+    downloadPlugin: (pluginId, pluginPath) => ipcRenderer.invoke('native-plugin-download', { pluginId, pluginPath }),
+    uninstallPlugin: (pluginId, pluginPath) => ipcRenderer.invoke('native-plugin-uninstall', { pluginId, pluginPath }),
+    onPluginDownloadProgress: (callback) => ipcRenderer.on('plugin-download-progress', (event, data) => callback(data)),
     
     // Chat Persistence API
     loadChats: () => ipcRenderer.invoke('load-chats'),
@@ -129,9 +125,77 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searxngStatus: () => ipcRenderer.invoke('searxng:status'),
     searxngCategories: () => ipcRenderer.invoke('searxng:categories'),
     
-    // Whisper ASR API
+    // ============ UNIVERSAL PLUGIN API v2.0 ============
+    // Core plugin system - works with ANY plugin type
+    
+    // Universal API caller - the main entry point for all plugin calls
+    pluginCall: (pluginId, apiType, action, params, options) => 
+        ipcRenderer.invoke('plugin-call', { pluginId, apiType, action, params, options }),
+    
+    // Registry functions
+    pluginGetRegistry: (forceRefresh) => 
+        ipcRenderer.invoke('plugin-get-registry', { forceRefresh }),
+    pluginGet: (pluginId) => 
+        ipcRenderer.invoke('plugin-get', pluginId),
+    pluginGetByType: (apiType) => 
+        ipcRenderer.invoke('plugin-get-by-type', apiType),
+    pluginGetByCategory: (category) => 
+        ipcRenderer.invoke('plugin-get-by-category', category),
+    pluginGetRunning: (containers) => 
+        ipcRenderer.invoke('plugin-get-running', containers),
+    pluginGetTypes: () => 
+        ipcRenderer.invoke('plugin-get-types'),
+    
+    // Convenience functions for common plugin types
+    pluginTtsSpeak: (text, pluginId, options) => 
+        ipcRenderer.invoke('plugin-tts-speak', { text, pluginId, options }),
+    pluginSttTranscribe: (audioData, mimeType, pluginId, options) => 
+        ipcRenderer.invoke('plugin-stt-transcribe', { audioData, mimeType, pluginId, options }),
+    pluginSearch: (query, pluginId, options) => 
+        ipcRenderer.invoke('plugin-search', { query, pluginId, options }),
+    pluginImageGenerate: (prompt, pluginId, options) => 
+        ipcRenderer.invoke('plugin-image-generate', { prompt, pluginId, options }),
+    pluginEmbed: (text, pluginId, options) => 
+        ipcRenderer.invoke('plugin-embed', { text, pluginId, options }),
+    pluginCodeExecute: (code, language, pluginId, options) => 
+        ipcRenderer.invoke('plugin-code-execute', { code, language, pluginId, options }),
+    
+    // Legacy APIs (kept for backwards compatibility)
     whisperTranscribe: (audioData, mimeType, endpoint) => 
         ipcRenderer.invoke('whisper-transcribe', { audioData, mimeType, endpoint }),
+    ttsSpeak: (text, endpoint) => 
+        ipcRenderer.invoke('tts-speak', { text, endpoint }),
+    
+    // ============ NATIVE PLUGIN API ============
+    // For JS/Python plugins that run locally without Docker
+    
+    // Scan and load all native plugins
+    nativePluginsScan: () => 
+        ipcRenderer.invoke('native-plugins-scan'),
+    
+    // List all loaded native plugins
+    nativePluginsList: () => 
+        ipcRenderer.invoke('native-plugins-list'),
+    
+    // Load a specific plugin
+    nativePluginLoad: (pluginPath) => 
+        ipcRenderer.invoke('native-plugin-load', pluginPath),
+    
+    // Unload a plugin
+    nativePluginUnload: (pluginId) => 
+        ipcRenderer.invoke('native-plugin-unload', pluginId),
+    
+    // Call a method on a native plugin
+    nativePluginCall: (pluginId, method, args) => 
+        ipcRenderer.invoke('native-plugin-call', { pluginId, method, args }),
+    
+    // Get all UI slots with registered elements
+    nativePluginsUISlots: () => 
+        ipcRenderer.invoke('native-plugins-ui-slots'),
+    
+    // Get UI elements for a specific slot
+    nativePluginsUISlot: (slotName) => 
+        ipcRenderer.invoke('native-plugins-ui-slot', slotName),
     
     // Auth API (Local account system)
     authRegister: (email, password, name) => ipcRenderer.invoke('auth-register', { email, password, name }),

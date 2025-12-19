@@ -14,11 +14,21 @@ let huggingface = null;
 let deepSearch = null;
 let imageGen = null;
 let ollama = null;
-let ollamaManager = null;
 let localLlama = null;
 let openmindModels = null;
 let searxng = null;
 let training = null;
+let pluginAPI = null;
+
+// Lazy loader for plugin API
+function getPluginAPI() {
+    if (!pluginAPI) {
+        const start = Date.now();
+        pluginAPI = require('./pluginAPI');
+        console.log(`[TIMING] pluginAPI loaded in ${Date.now() - start}ms`);
+    }
+    return pluginAPI;
+}
 
 // Lazy loaders for heavy modules with timing
 function getModelScanner() {
@@ -40,8 +50,31 @@ function getHuggingface() {
 function getDeepSearch() {
     if (!deepSearch) {
         const start = Date.now();
-        deepSearch = require('./deepSearch');
-        console.log(`[TIMING] deepSearch loaded in ${Date.now() - start}ms`);
+        // Try to load from plugin first, fallback to old module
+        const pluginsDir = path.join(app.getPath('userData'), '..', 'openmind-plugins');
+        const pluginPath = path.join(pluginsDir, 'deep-search', 'index.js');
+        const localPluginPath = path.join(__dirname, '..', 'plugins', 'deep-search', 'index.js');
+        
+        if (fs.existsSync(pluginPath)) {
+            deepSearch = require(pluginPath);
+            console.log(`[TIMING] deepSearch plugin loaded in ${Date.now() - start}ms`);
+        } else if (fs.existsSync(localPluginPath)) {
+            deepSearch = require(localPluginPath);
+            console.log(`[TIMING] deepSearch local plugin loaded in ${Date.now() - start}ms`);
+        } else {
+            // Fallback to old module (will be removed later)
+            try {
+                deepSearch = require('./deepSearch');
+                console.log(`[TIMING] deepSearch legacy loaded in ${Date.now() - start}ms`);
+            } catch (e) {
+                console.error('[DeepSearch] No module found');
+                deepSearch = {
+                    getDeepSearchTools: () => [],
+                    executeToolCall: async () => ({ success: false, error: 'DeepSearch not available' }),
+                    closeBrowser: async () => {}
+                };
+            }
+        }
     }
     return deepSearch;
 }
@@ -61,14 +94,7 @@ function getOllama() {
     }
     return ollama;
 }
-function getOllamaManager() {
-    if (!ollamaManager) {
-        const start = Date.now();
-        ollamaManager = require('./ollamaManager');
-        console.log(`[TIMING] ollamaManager loaded in ${Date.now() - start}ms`);
-    }
-    return ollamaManager;
-}
+
 function getLocalLlama() {
     if (!localLlama) {
         const start = Date.now();
@@ -203,40 +229,6 @@ ipcMain.on('close-window', () => {
     if (mainWindow) mainWindow.close();
 });
 
-// Ollama Server Management (with bundled binary support)
-ipcMain.handle('get-ollama-server-status', async () => {
-    const status = getOllamaManager().getStatus();
-    const running = await getOllamaManager().isServerRunning();
-    return { ...status, running };
-});
-
-ipcMain.handle('start-ollama-server', async () => {
-    console.log('Starting bundled Ollama server...');
-    return await getOllamaManager().startServer((log) => {
-        console.log('[Ollama Server]', log.type, log.message);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ollama-server-log', log);
-        }
-    });
-});
-
-ipcMain.handle('stop-ollama-server', async () => {
-    getOllamaManager().stopServer();
-    return { success: true };
-});
-
-ipcMain.handle('download-ollama', async () => {
-    return await getOllamaManager().downloadOllama((progress) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ollama-download-progress', progress);
-        }
-    });
-});
-
-ipcMain.handle('check-ollama-updates', async () => {
-    return await getOllamaManager().checkForUpdates();
-});
-
 // Fetch Ollama Models (using ollama-js library)
 ipcMain.handle('get-ollama-models', async () => {
     const host = `http://${ollamaHost}:11434`;
@@ -276,6 +268,13 @@ ipcMain.handle('execute-ollama-command', async (event, command) => {
             mainWindow.webContents.send('ollama-terminal-progress', progress);
         }
     });
+});
+
+// Verbose API Test - logs everything from Ollama response
+ipcMain.handle('ollama-verbose-test', async (event, { model, prompt }) => {
+    console.log('Starting verbose API test for model:', model);
+    const host = `http://${ollamaHost}:11434`;
+    return await getOllama().verboseApiTest({ model, prompt, host });
 });
 
 // ============ Local LLM (node-llama-cpp) ============
@@ -573,7 +572,8 @@ ipcMain.handle('send-deepsearch-message', async (event, { model, messages }) => 
         content: compressContent(msg.content)
     }));
     
-    const tools = getDeepSearch().getDeepSearchTools();
+    const ds = getDeepSearch();
+    const tools = ds.getTools ? ds.getTools() : (ds.getDeepSearchTools ? ds.getDeepSearchTools() : []);
 
     const now = new Date();
     const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -1331,6 +1331,86 @@ ipcMain.handle('load-online-plugin-registry', async () => {
     }
 });
 
+// Load API Plugin Registry (from GitHub or local fallback)
+// This is separate from Docker plugins - these are native JS/Python plugins
+ipcMain.handle('load-api-plugin-registry', async () => {
+    const https = require('https');
+    
+    // GitHub URL for API plugins registry (note: case-sensitive path)
+    const apiUrl = 'https://api.github.com/repos/OpenChatGit/OpenMindLabs-Plugins/contents/Plugins/registry.json';
+    
+    return new Promise((resolve) => {
+        // Try GitHub API first
+        const request = https.get(apiUrl, {
+            timeout: 5000,
+            headers: {
+                'User-Agent': 'OpenMind-App',
+                'Accept': 'application/vnd.github.v3.raw'
+            }
+        }, (res) => {
+            if (res.statusCode === 200) {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const registry = JSON.parse(data);
+                        console.log(`[API Plugins] Loaded ${registry.plugins?.length || 0} plugins from GitHub`);
+                        resolve({
+                            success: true,
+                            plugins: registry.plugins || [],
+                            categories: registry.categories || [],
+                            iconsBaseUrl: registry.iconsBaseUrl || '',
+                            source: 'github'
+                        });
+                    } catch (e) {
+                        console.error('[API Plugins] Parse error:', e);
+                        loadLocalFallback();
+                    }
+                });
+            } else {
+                loadLocalFallback();
+            }
+        });
+        
+        request.on('error', () => loadLocalFallback());
+        request.on('timeout', () => {
+            request.destroy();
+            loadLocalFallback();
+        });
+        
+        // Local fallback
+        function loadLocalFallback() {
+            try {
+                const appPath = app.isPackaged 
+                    ? path.dirname(app.getPath('exe'))
+                    : path.join(__dirname, '..');
+                
+                const registryPath = path.join(appPath, 'plugins', 'registry.json');
+                
+                if (!fs.existsSync(registryPath)) {
+                    resolve({ success: true, plugins: [], categories: [], source: 'none' });
+                    return;
+                }
+                
+                const registryData = fs.readFileSync(registryPath, 'utf8');
+                const registry = JSON.parse(registryData);
+                
+                console.log(`[API Plugins] Loaded ${registry.plugins?.length || 0} plugins from local`);
+                resolve({
+                    success: true,
+                    plugins: registry.plugins || [],
+                    categories: registry.categories || [],
+                    iconsBaseUrl: registry.iconsBaseUrl || '',
+                    source: 'local'
+                });
+            } catch (error) {
+                console.error('[API Plugins] Local fallback error:', error);
+                resolve({ success: false, error: error.message, plugins: [], categories: [] });
+            }
+        }
+    });
+});
+
 // Model Creator - Create custom Ollama models
 ipcMain.handle('create-ollama-model', async (event, { name, baseModel, systemPrompt, params }) => {
     console.log('Creating Ollama model:', { name, baseModel });
@@ -1506,20 +1586,6 @@ app.whenReady().then(async () => {
         // Load custom model system prompts (fast, local file)
         loadCustomModelPrompts();
         
-        // Check Ollama status (non-blocking) - only load module when needed
-        setTimeout(() => {
-            getOllamaManager().isServerRunning().then(ollamaRunning => {
-                if (ollamaRunning) {
-                    console.log('✓ Ollama server detected');
-                } else {
-                    console.log('ℹ Ollama not running');
-                    if (getOllamaManager().hasBundledOllama()) {
-                        console.log('✓ Bundled Ollama available');
-                    }
-                }
-            });
-        }, 100);
-        
         // Setup SearXNG handlers (fast) - only load module when needed
         setTimeout(() => {
             getSearxng().setupSearXNGHandlers();
@@ -1688,7 +1754,164 @@ ipcMain.handle('save-settings', async (event, settings) => {
         return { success: false, error: error.message };
     }
 });
-// ============ Whisper ASR IPC Handler ============
+// ============ Universal Plugin API System ============
+
+// Call any plugin API - the universal entry point
+ipcMain.handle('plugin-call', async (event, { pluginId, apiType, action, params, options }) => {
+    try {
+        const result = await getPluginAPI().callAPI(pluginId, apiType, action, params, options);
+        return result;
+    } catch (error) {
+        console.error('[PluginAPI] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Get plugin registry
+ipcMain.handle('plugin-get-registry', async (event, { forceRefresh }) => {
+    try {
+        const registry = await getPluginAPI().loadPluginRegistry(forceRefresh);
+        return { success: true, registry };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get plugin by ID
+ipcMain.handle('plugin-get', async (event, pluginId) => {
+    try {
+        const plugin = await getPluginAPI().getPlugin(pluginId);
+        return { success: true, plugin };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get plugins by API type
+ipcMain.handle('plugin-get-by-type', async (event, apiType) => {
+    try {
+        const plugins = await getPluginAPI().getPluginsByType(apiType);
+        return { success: true, plugins };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get plugins by category
+ipcMain.handle('plugin-get-by-category', async (event, category) => {
+    try {
+        const plugins = await getPluginAPI().getPluginsByCategory(category);
+        return { success: true, plugins };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get running plugins
+ipcMain.handle('plugin-get-running', async (event, containers) => {
+    try {
+        const plugins = await getPluginAPI().getRunningPlugins(containers);
+        return { success: true, plugins };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get supported plugin types
+ipcMain.handle('plugin-get-types', async () => {
+    try {
+        const types = getPluginAPI().getPluginTypes();
+        return { success: true, types };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// ===== Convenience Handlers =====
+
+// TTS - Text to Speech
+ipcMain.handle('plugin-tts-speak', async (event, { text, pluginId, options }) => {
+    try {
+        const result = await getPluginAPI().speak(text, { pluginId, ...options });
+        if (result.success) {
+            return { success: true, audio: result.data, mimeType: result.mimeType };
+        }
+        return result;
+    } catch (error) {
+        console.error('[Plugin:TTS] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// STT - Speech to Text
+ipcMain.handle('plugin-stt-transcribe', async (event, { audioData, mimeType, pluginId, options }) => {
+    try {
+        const audioBuffer = Buffer.from(audioData, 'base64');
+        const result = await getPluginAPI().transcribe(audioBuffer, { 
+            pluginId, 
+            mimeType,
+            ...options 
+        });
+        if (result.success) {
+            const text = typeof result.data === 'string' ? result.data : 
+                        (result.data?.text || result.data?.transcription || '');
+            return { success: true, text };
+        }
+        return result;
+    } catch (error) {
+        console.error('[Plugin:STT] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Search
+ipcMain.handle('plugin-search', async (event, { query, pluginId, options }) => {
+    try {
+        const result = await getPluginAPI().search(query, { pluginId, ...options });
+        return result;
+    } catch (error) {
+        console.error('[Plugin:Search] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Image Generation
+ipcMain.handle('plugin-image-generate', async (event, { prompt, pluginId, options }) => {
+    try {
+        const result = await getPluginAPI().generateImage(prompt, { pluginId, ...options });
+        if (result.success) {
+            return { success: true, image: result.data, mimeType: result.mimeType };
+        }
+        return result;
+    } catch (error) {
+        console.error('[Plugin:ImageGen] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Embeddings
+ipcMain.handle('plugin-embed', async (event, { text, pluginId, options }) => {
+    try {
+        const result = await getPluginAPI().embed(text, { pluginId, ...options });
+        return result;
+    } catch (error) {
+        console.error('[Plugin:Embed] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Code Execution
+ipcMain.handle('plugin-code-execute', async (event, { code, language, pluginId, options }) => {
+    try {
+        const result = await getPluginAPI().executeCode(code, language, { pluginId, ...options });
+        return result;
+    } catch (error) {
+        console.error('[Plugin:CodeExec] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// ============ Whisper ASR IPC Handler (Legacy - kept for compatibility) ============
 
 ipcMain.handle('whisper-transcribe', async (event, { audioData, mimeType, endpoint }) => {
     try {
@@ -1726,6 +1949,282 @@ ipcMain.handle('whisper-transcribe', async (event, { audioData, mimeType, endpoi
         }
     } catch (error) {
         console.error('[Whisper] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// ============ Coqui TTS IPC Handler ============
+
+ipcMain.handle('tts-speak', async (event, { text, endpoint }) => {
+    try {
+        const fetch = require('node-fetch');
+        
+        const url = `${endpoint}/api/tts?text=${encodeURIComponent(text)}`;
+        console.log('[TTS] Requesting speech for:', text.substring(0, 50) + '...');
+        
+        const response = await fetch(url);
+        
+        if (response.ok) {
+            const audioBuffer = await response.buffer();
+            const base64Audio = audioBuffer.toString('base64');
+            console.log('[TTS] Audio generated, size:', audioBuffer.length);
+            return { success: true, audio: base64Audio, mimeType: 'audio/wav' };
+        } else {
+            const errorText = await response.text();
+            console.error('[TTS] API error:', response.status, errorText);
+            return { success: false, error: `API error: ${response.status}` };
+        }
+    } catch (error) {
+        console.error('[TTS] Error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// ============ Native Plugin IPC Handlers ============
+
+// Load all native plugins from plugins directory
+ipcMain.handle('native-plugins-scan', async () => {
+    try {
+        // Scan plugins directly in the plugins folder (not in native subfolder)
+        const pluginsDir = path.join(__dirname, '../plugins');
+        const results = await getPluginAPI().scanAndLoadPlugins(pluginsDir);
+        return { success: true, plugins: results };
+    } catch (error) {
+        console.error('[NativePlugins] Scan error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Check which plugins are actually installed (have code in plugins folder)
+ipcMain.handle('native-plugins-check-installed', async () => {
+    try {
+        const pluginsDir = path.join(__dirname, '../plugins');
+        const installedPluginIds = [];
+        
+        // Skip these folders - they're not plugins
+        const SKIP_FOLDERS = ['icons', 'native', 'node_modules', '.git'];
+        
+        if (fs.existsSync(pluginsDir)) {
+            const entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
+            
+            for (const entry of entries) {
+                if (entry.isDirectory() && !SKIP_FOLDERS.includes(entry.name)) {
+                    const manifestPath = path.join(pluginsDir, entry.name, 'manifest.json');
+                    if (fs.existsSync(manifestPath)) {
+                        try {
+                            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                            if (manifest.id) {
+                                installedPluginIds.push(manifest.id);
+                            }
+                        } catch (e) {
+                            console.error(`[NativePlugins] Error reading manifest in ${entry.name}:`, e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        console.log('[NativePlugins] Installed plugins:', installedPluginIds);
+        return { success: true, installedPluginIds };
+    } catch (error) {
+        console.error('[NativePlugins] Check installed error:', error);
+        return { success: false, error: error.message, installedPluginIds: [] };
+    }
+});
+
+// Download and install a plugin from GitHub
+ipcMain.handle('native-plugin-download', async (event, { pluginId, pluginPath }) => {
+    const https = require('https');
+    
+    console.log(`[NativePlugins] Downloading plugin: ${pluginId} from path: ${pluginPath}`);
+    
+    // GitHub API URL to list files in the plugin folder
+    const apiUrl = `https://api.github.com/repos/OpenChatGit/OpenMindLabs-Plugins/contents/Plugins/${pluginPath}`;
+    const pluginsDir = path.join(__dirname, '../plugins');
+    const targetDir = path.join(pluginsDir, pluginPath);
+    
+    // Send progress to frontend
+    const sendProgress = (status, message, progress = 0) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('plugin-download-progress', { pluginId, status, message, progress });
+        }
+    };
+    
+    return new Promise((resolve) => {
+        sendProgress('downloading', 'Fetching file list...', 0);
+        
+        // Get list of files in the plugin folder
+        const request = https.get(apiUrl, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'OpenMind-App',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        }, (res) => {
+            if (res.statusCode !== 200) {
+                resolve({ success: false, error: `GitHub API error: ${res.statusCode}` });
+                return;
+            }
+            
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', async () => {
+                try {
+                    const files = JSON.parse(data);
+                    
+                    if (!Array.isArray(files)) {
+                        resolve({ success: false, error: 'Invalid response from GitHub' });
+                        return;
+                    }
+                    
+                    // Create target directory
+                    if (!fs.existsSync(targetDir)) {
+                        fs.mkdirSync(targetDir, { recursive: true });
+                    }
+                    
+                    // Download each file
+                    const totalFiles = files.filter(f => f.type === 'file').length;
+                    let downloadedFiles = 0;
+                    
+                    for (const file of files) {
+                        if (file.type === 'file') {
+                            sendProgress('downloading', `Downloading ${file.name}...`, Math.round((downloadedFiles / totalFiles) * 100));
+                            
+                            try {
+                                await downloadFile(file.download_url, path.join(targetDir, file.name));
+                                downloadedFiles++;
+                            } catch (err) {
+                                console.error(`[NativePlugins] Error downloading ${file.name}:`, err);
+                            }
+                        }
+                    }
+                    
+                    sendProgress('complete', 'Plugin installed!', 100);
+                    console.log(`[NativePlugins] Downloaded ${downloadedFiles} files for ${pluginId}`);
+                    resolve({ success: true, filesDownloaded: downloadedFiles });
+                    
+                } catch (e) {
+                    console.error('[NativePlugins] Download error:', e);
+                    resolve({ success: false, error: e.message });
+                }
+            });
+        });
+        
+        request.on('error', (err) => {
+            resolve({ success: false, error: err.message });
+        });
+        
+        request.on('timeout', () => {
+            request.destroy();
+            resolve({ success: false, error: 'Request timeout' });
+        });
+    });
+    
+    // Helper to download a single file
+    function downloadFile(url, destPath) {
+        return new Promise((resolve, reject) => {
+            const file = fs.createWriteStream(destPath);
+            https.get(url, {
+                headers: { 'User-Agent': 'OpenMind-App' }
+            }, (response) => {
+                // Handle redirects
+                if (response.statusCode === 301 || response.statusCode === 302) {
+                    https.get(response.headers.location, {
+                        headers: { 'User-Agent': 'OpenMind-App' }
+                    }, (redirectRes) => {
+                        redirectRes.pipe(file);
+                        file.on('finish', () => { file.close(); resolve(); });
+                    }).on('error', reject);
+                } else {
+                    response.pipe(file);
+                    file.on('finish', () => { file.close(); resolve(); });
+                }
+            }).on('error', (err) => {
+                fs.unlink(destPath, () => {});
+                reject(err);
+            });
+        });
+    }
+});
+
+// Uninstall a plugin (delete its folder)
+ipcMain.handle('native-plugin-uninstall', async (event, { pluginId, pluginPath }) => {
+    console.log(`[NativePlugins] Uninstalling plugin: ${pluginId}`);
+    
+    try {
+        const pluginsDir = path.join(__dirname, '../plugins');
+        const targetDir = path.join(pluginsDir, pluginPath);
+        
+        if (fs.existsSync(targetDir)) {
+            fs.rmSync(targetDir, { recursive: true, force: true });
+            console.log(`[NativePlugins] Deleted: ${targetDir}`);
+            return { success: true };
+        } else {
+            return { success: false, error: 'Plugin folder not found' };
+        }
+    } catch (error) {
+        console.error('[NativePlugins] Uninstall error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Get all loaded native plugins
+ipcMain.handle('native-plugins-list', async () => {
+    try {
+        const plugins = getPluginAPI().getNativePlugins();
+        return { success: true, plugins };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Load a specific native plugin
+ipcMain.handle('native-plugin-load', async (event, pluginPath) => {
+    try {
+        const result = await getPluginAPI().loadNativePlugin(pluginPath);
+        return result;
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Unload a native plugin
+ipcMain.handle('native-plugin-unload', async (event, pluginId) => {
+    try {
+        const result = await getPluginAPI().unloadNativePlugin(pluginId);
+        return result;
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Call a method on a native plugin
+ipcMain.handle('native-plugin-call', async (event, { pluginId, method, args }) => {
+    try {
+        const result = await getPluginAPI().callNativePlugin(pluginId, method, ...(args || []));
+        return { success: true, result };
+    } catch (error) {
+        console.error(`[NativePlugin:${pluginId}] ${method} error:`, error);
+        return { success: false, error: error.message };
+    }
+});
+
+// Get all UI slots
+ipcMain.handle('native-plugins-ui-slots', async () => {
+    try {
+        const slots = getPluginAPI().getAllUISlots();
+        return { success: true, slots };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get UI elements for a specific slot
+ipcMain.handle('native-plugins-ui-slot', async (event, slotName) => {
+    try {
+        const elements = getPluginAPI().getUISlot(slotName);
+        return { success: true, elements };
+    } catch (error) {
         return { success: false, error: error.message };
     }
 });
@@ -1809,14 +2308,13 @@ ipcMain.handle('training-check-status', async (event, { jobId, hfToken }) => {
 
 app.on('window-all-closed', async () => {
     // Kill PTY terminal (only if loaded)
-    // Close DeepSearch browser (only if loaded)
-    if (deepSearch) await getDeepSearch().closeBrowser();
+    // Cleanup DeepSearch plugin (only if loaded)
+    if (deepSearch && deepSearch.cleanup) {
+        await deepSearch.cleanup();
+    }
     
     // Stop image generation process (only if loaded)
     if (imageGen) getImageGen().stopProcess();
-    
-    // Stop Ollama server if we started it (only if loaded)
-    if (ollamaManager) getOllamaManager().stopServer();
     
     if (process.platform !== 'darwin') {
         app.quit();

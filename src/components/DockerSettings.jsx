@@ -210,8 +210,9 @@ const PluginCard = memo(({
 
 /**
  * DockerSettings - Component for displaying Docker status and managing containers
+ * @param {boolean} embedded - If true, hides the header (used when embedded in PluginsSettings)
  */
-const DockerSettings = ({ theme, isDark }) => {
+const DockerSettings = ({ theme, isDark, embedded = false }) => {
   const [dockerStatus, setDockerStatus] = useState({ running: false, version: null });
   const [containers, setContainers] = useState([]);
   const [plugins, setPlugins] = useState([]);
@@ -307,13 +308,15 @@ const DockerSettings = ({ theme, isDark }) => {
     loadPlugins();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Separate interval effect - only refresh when tab is active, longer interval
+  // Separate interval effect - only refresh when tab is active, much longer interval
   useEffect(() => {
+    // Only poll when Docker is running and component is visible
+    // Use 60 seconds to reduce CPU usage significantly
     const interval = setInterval(() => {
       if (dockerRunningRef.current && isActiveRef.current && document.visibilityState === 'visible') {
         loadDockerInfo();
       }
-    }, 30000); // 30 seconds instead of 10
+    }, 60000); // 60 seconds - much less frequent
     
     // Pause when tab is hidden
     const handleVisibility = () => {
@@ -615,38 +618,66 @@ const DockerSettings = ({ theme, isDark }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h3 style={{ color: theme.text, fontSize: '1.1rem', fontWeight: '600', margin: '0 0 8px 0' }}>
-            Docker
-          </h3>
-          <p style={{ color: theme.textSecondary, fontSize: '0.85rem', margin: 0 }}>
-            Manage Docker containers and view status.
-          </p>
+      {/* Header - hidden when embedded */}
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h3 style={{ color: theme.text, fontSize: '1.1rem', fontWeight: '600', margin: '0 0 8px 0' }}>
+              Docker
+            </h3>
+            <p style={{ color: theme.textSecondary, fontSize: '0.85rem', margin: 0 }}>
+              Manage Docker containers and view status.
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              background: theme.bgTertiary,
+              border: `1px solid ${theme.border}`,
+              borderRadius: '6px',
+              padding: '8px 12px',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              color: theme.textSecondary,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.85rem',
+              opacity: refreshing ? 0.6 : 1,
+              transition: 'all 0.2s',
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh
+          </button>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          style={{
-            background: theme.bgTertiary,
-            border: `1px solid ${theme.border}`,
-            borderRadius: '6px',
-            padding: '8px 12px',
-            cursor: refreshing ? 'not-allowed' : 'pointer',
-            color: theme.textSecondary,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '0.85rem',
-            opacity: refreshing ? 0.6 : 1,
-            transition: 'all 0.2s',
-          }}
-        >
-          <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-          Refresh
-        </button>
-      </div>
+      )}
+
+      {/* Refresh button when embedded (header is hidden) */}
+      {embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              background: theme.bgTertiary,
+              border: `1px solid ${theme.border}`,
+              borderRadius: '6px',
+              padding: '6px 10px',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              color: theme.textSecondary,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.8rem',
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh
+          </button>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       {dockerStatus.running && (

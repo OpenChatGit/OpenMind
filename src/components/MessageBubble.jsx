@@ -1,5 +1,5 @@
-import { useState, memo, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Copy, Info, RotateCcw, Check, Image } from 'lucide-react';
+import { useState, useEffect, memo, useMemo, useRef } from 'react';
+import { ChevronDown, ChevronRight, Copy, Info, RotateCcw, Check, Image, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -35,12 +35,116 @@ const MessageBubble = memo(({
   const [copiedMessageId, setCopiedMessageId] = useState(null);
   const [showInfoDropdown, setShowInfoDropdown] = useState(false);
   const [infoDropdownPosition, setInfoDropdownPosition] = useState('below');
+  
+  // TTS State
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoadingTTS, setIsLoadingTTS] = useState(false);
+  const [ttsAvailable, setTtsAvailable] = useState(false);
+  const audioRef = useRef(null);
+
+  // Check if TTS container is running
+  useEffect(() => {
+    const checkTTS = async () => {
+      try {
+        const dockerStatus = await window.electronAPI?.checkDockerStatus();
+        if (!dockerStatus?.running) {
+          setTtsAvailable(false);
+          return;
+        }
+        
+        const result = await window.electronAPI?.getDockerContainers();
+        if (result?.success) {
+          const ttsRunning = result.containers?.some(c => 
+            c.name?.includes('openmind-tts') && c.state === 'running'
+          );
+          setTtsAvailable(ttsRunning);
+        }
+      } catch {
+        setTtsAvailable(false);
+      }
+    };
+    
+    checkTTS();
+    const interval = setInterval(checkTTS, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   const handleCopy = async () => {
     const success = await onCopy(msg.content || '');
     if (success) {
       setCopiedMessageId(msg.id);
       setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  };
+
+  // TTS speak function
+  const handleSpeak = async () => {
+    if (!msg.content || !ttsAvailable) return;
+    
+    // If already speaking, stop
+    if (isSpeaking && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsSpeaking(false);
+      return;
+    }
+    
+    setIsLoadingTTS(true);
+    
+    try {
+      // Clean text for TTS (remove markdown, code blocks, etc.)
+      const cleanText = msg.content
+        .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+        .replace(/`[^`]+`/g, '') // Remove inline code
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Convert links to text
+        .replace(/[#*_~]/g, '') // Remove markdown formatting
+        .replace(/\n+/g, '. ') // Convert newlines to pauses
+        .trim()
+        .substring(0, 1000); // Limit length
+      
+      if (!cleanText) {
+        setIsLoadingTTS(false);
+        return;
+      }
+      
+      // Use generic plugin TTS API - works with any tts-api plugin
+      const result = await window.electronAPI?.pluginTtsSpeak?.(cleanText)
+        || await window.electronAPI?.ttsSpeak?.(cleanText, 'http://localhost:5002');
+      
+      if (result?.success && result.audio) {
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(result.audio), c => c.charCodeAt(0))],
+          { type: result.mimeType || 'audio/wav' }
+        );
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        audioRef.current = new Audio(audioUrl);
+        audioRef.current.onended = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+        };
+        audioRef.current.onerror = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+        };
+        
+        await audioRef.current.play();
+        setIsSpeaking(true);
+      }
+    } catch (err) {
+      console.error('TTS error:', err);
+    } finally {
+      setIsLoadingTTS(false);
     }
   };
 
@@ -414,6 +518,36 @@ const MessageBubble = memo(({
               {copiedMessageId === msg.id ? <Check size={16} /> : <Copy size={16} />}
             </button>
 
+            {/* TTS Speaker Button - only shows when TTS container is running */}
+            {ttsAvailable && msg.content && (
+              <button
+                onClick={handleSpeak}
+                disabled={isLoadingTTS}
+                style={{
+                  background: isSpeaking ? (isDark ? 'white' : '#1a1a1a') : 'transparent',
+                  border: 'none',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  cursor: isLoadingTTS ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: isSpeaking ? (isDark ? 'black' : 'white') : '#666',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => { if (!isSpeaking) e.currentTarget.style.color = '#aaa'; }}
+                onMouseLeave={(e) => { if (!isSpeaking) e.currentTarget.style.color = '#666'; }}
+                title={isSpeaking ? 'Stop speaking' : isLoadingTTS ? 'Loading...' : 'Read aloud'}
+              >
+                {isLoadingTTS ? (
+                  <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                ) : isSpeaking ? (
+                  <VolumeX size={16} />
+                ) : (
+                  <Volume2 size={16} />
+                )}
+              </button>
+            )}
+
             {/* Info Button */}
             <div style={{ position: 'relative' }}>
               <button
@@ -577,15 +711,20 @@ const MessageBubble = memo(({
   );
 }, (prevProps, nextProps) => {
   // Custom comparison for memo - only re-render when necessary
+  // IMPORTANT: Include all props that affect rendering during streaming
   return (
     prevProps.msg.id === nextProps.msg.id &&
     prevProps.msg.content === nextProps.msg.content &&
+    prevProps.msg.thinking === nextProps.msg.thinking && // For reasoning streaming
     prevProps.msg.isStreaming === nextProps.msg.isStreaming &&
+    prevProps.msg.isGenerating === nextProps.msg.isGenerating &&
     prevProps.isDark === nextProps.isDark &&
     prevProps.isDeepSearching === nextProps.isDeepSearching &&
     prevProps.isReasoning === nextProps.isReasoning &&
+    prevProps.isWebSearching === nextProps.isWebSearching && // For "Searching Web" status
     prevProps.imageGenProgress === nextProps.imageGenProgress &&
-    prevProps.expandedReasoning === nextProps.expandedReasoning
+    prevProps.expandedReasoning === nextProps.expandedReasoning &&
+    prevProps.searchedFavicons?.length === nextProps.searchedFavicons?.length // For favicon updates
   );
 });
 

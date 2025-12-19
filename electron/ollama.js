@@ -5,16 +5,39 @@ let currentHost = 'http://127.0.0.1:11434';
 
 // Helper function to extract <think> tags from content
 function extractThinkTags(content) {
-    const thinkRegex = /<think>([\s\S]*?)<\/think>/gi;
+    if (!content) return { thinking: '', content: '' };
+    
     let thinking = '';
     let cleanContent = content;
     
-    let match;
-    while ((match = thinkRegex.exec(content)) !== null) {
-        thinking += match[1].trim() + '\n';
+    // Handle complete <think>...</think> blocks
+    const completeThinkRegex = /<think>([\s\S]*?)<\/think>/gi;
+    const matches = content.match(completeThinkRegex);
+    
+    if (matches) {
+        matches.forEach(match => {
+            // Extract content between tags
+            const innerMatch = match.match(/<think>([\s\S]*?)<\/think>/i);
+            if (innerMatch && innerMatch[1]) {
+                thinking += innerMatch[1].trim() + '\n';
+            }
+        });
+        // Remove complete think blocks from content
+        cleanContent = content.replace(completeThinkRegex, '').trim();
     }
     
-    cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    // Handle incomplete/streaming <think> tag (opened but not closed yet)
+    // This happens during streaming when we have "<think>..." but no "</think>" yet
+    const incompleteThinkMatch = cleanContent.match(/<think>([\s\S]*)$/i);
+    if (incompleteThinkMatch) {
+        // There's an unclosed <think> tag - the content after it is still thinking
+        thinking += incompleteThinkMatch[1].trim();
+        // Remove the incomplete think tag from content
+        cleanContent = cleanContent.replace(/<think>[\s\S]*$/i, '').trim();
+    }
+    
+    // Clean up any stray </think> tags that might appear at the start
+    cleanContent = cleanContent.replace(/^<\/think>\s*/i, '').trim();
     
     return { thinking: thinking.trim(), content: cleanContent };
 }
@@ -76,10 +99,12 @@ async function chat(options, onThinking, onContent) {
         return { role: msg.role, content: msg.content };
     });
 
-    let thinkingContent = '';
+    let nativeThinking = '';  // From Ollama's native thinking field
+    let tagThinking = '';     // From <think> tags in content
     let messageContent = '';
     let rawContent = '';
     let stats = {};
+    let usesNativeThinking = false;  // Track if model uses native thinking
 
     try {
         const response = await client.chat({
@@ -89,24 +114,31 @@ async function chat(options, onThinking, onContent) {
         });
 
         for await (const part of response) {
-            // Handle native thinking field
+            // Handle native thinking field (new Ollama API)
             if (part.message?.thinking) {
-                thinkingContent += part.message.thinking;
-                if (onThinking) onThinking(thinkingContent);
+                usesNativeThinking = true;
+                nativeThinking += part.message.thinking;
+                if (onThinking) onThinking(nativeThinking);
             }
 
             if (part.message?.content) {
                 rawContent += part.message.content;
                 
-                // Extract <think> tags from content (Qwen3 style)
-                const extracted = extractThinkTags(rawContent);
-                
-                if (extracted.thinking && extracted.thinking !== thinkingContent) {
-                    thinkingContent = extracted.thinking;
-                    if (onThinking) onThinking(thinkingContent);
+                // Only extract <think> tags if model doesn't use native thinking
+                if (!usesNativeThinking) {
+                    const extracted = extractThinkTags(rawContent);
+                    
+                    if (extracted.thinking) {
+                        tagThinking = extracted.thinking;
+                        if (onThinking) onThinking(tagThinking);
+                    }
+                    
+                    messageContent = extracted.content;
+                } else {
+                    // Model uses native thinking, content is clean
+                    messageContent = rawContent;
                 }
                 
-                messageContent = extracted.content;
                 if (onContent) onContent(messageContent);
             }
 
@@ -124,10 +156,19 @@ async function chat(options, onThinking, onContent) {
             }
         }
 
-        const finalExtracted = extractThinkTags(rawContent);
+        // Final processing
+        let finalThinking = nativeThinking;
+        let finalContent = messageContent;
+        
+        if (!usesNativeThinking) {
+            const finalExtracted = extractThinkTags(rawContent);
+            finalThinking = finalExtracted.thinking;
+            finalContent = finalExtracted.content;
+        }
+        
         return {
-            thinking: thinkingContent || finalExtracted.thinking,
-            content: finalExtracted.content || messageContent || 'No response',
+            thinking: finalThinking,
+            content: finalContent || 'No response',
             stats
         };
     } catch (error) {
@@ -141,11 +182,13 @@ async function chatWithTools(options, onThinking, onContent) {
     const { model, messages, tools, host = currentHost, modelOptions = {} } = options;
     const client = getClient(host);
 
-    let thinkingContent = '';
+    let nativeThinking = '';
+    let tagThinking = '';
     let messageContent = '';
     let rawContent = '';
     let toolCalls = null;
     let stats = {};
+    let usesNativeThinking = false;
 
     try {
         const response = await client.chat({
@@ -157,21 +200,29 @@ async function chatWithTools(options, onThinking, onContent) {
         });
 
         for await (const part of response) {
+            // Handle native thinking field (new Ollama API)
             if (part.message?.thinking) {
-                thinkingContent += part.message.thinking;
-                if (onThinking) onThinking(thinkingContent);
+                usesNativeThinking = true;
+                nativeThinking += part.message.thinking;
+                if (onThinking) onThinking(nativeThinking);
             }
 
             if (part.message?.content) {
                 rawContent += part.message.content;
-                const extracted = extractThinkTags(rawContent);
                 
-                if (extracted.thinking && extracted.thinking !== thinkingContent) {
-                    thinkingContent = extracted.thinking;
-                    if (onThinking) onThinking(thinkingContent);
+                if (!usesNativeThinking) {
+                    const extracted = extractThinkTags(rawContent);
+                    
+                    if (extracted.thinking) {
+                        tagThinking = extracted.thinking;
+                        if (onThinking) onThinking(tagThinking);
+                    }
+                    
+                    messageContent = extracted.content;
+                } else {
+                    messageContent = rawContent;
                 }
                 
-                messageContent = extracted.content;
                 if (onContent) onContent(messageContent);
             }
 
@@ -193,11 +244,20 @@ async function chatWithTools(options, onThinking, onContent) {
             }
         }
 
-        const finalExtracted = extractThinkTags(rawContent);
+        // Final processing
+        let finalThinking = nativeThinking;
+        let finalContent = messageContent;
+        
+        if (!usesNativeThinking) {
+            const finalExtracted = extractThinkTags(rawContent);
+            finalThinking = finalExtracted.thinking;
+            finalContent = finalExtracted.content;
+        }
+        
         return {
             message: {
-                thinking: thinkingContent || finalExtracted.thinking,
-                content: finalExtracted.content || messageContent,
+                thinking: finalThinking,
+                content: finalContent,
                 tool_calls: toolCalls
             },
             stats
@@ -389,6 +449,141 @@ async function executeCommand(command, onProgress = null, host = currentHost) {
     });
 }
 
+// Super verbose API test - logs EVERYTHING from Ollama response
+async function verboseApiTest(options) {
+    const { model, prompt = "What is 2+2? Think step by step.", host = currentHost } = options;
+    const client = getClient(host);
+    
+    console.log('\n' + '='.repeat(80));
+    console.log('[VERBOSE API TEST] Starting test with model:', model);
+    console.log('[VERBOSE API TEST] Prompt:', prompt);
+    console.log('[VERBOSE API TEST] Host:', host);
+    console.log('='.repeat(80) + '\n');
+    
+    const messages = [{ role: 'user', content: prompt }];
+    
+    let allParts = [];
+    let partIndex = 0;
+    
+    try {
+        const response = await client.chat({
+            model,
+            messages,
+            stream: true
+        });
+        
+        console.log('[VERBOSE] Starting stream...\n');
+        
+        for await (const part of response) {
+            partIndex++;
+            
+            // Log EVERY part with full detail
+            console.log(`\n--- PART ${partIndex} ---`);
+            console.log('[VERBOSE] Full part object:');
+            console.log(JSON.stringify(part, null, 2));
+            
+            // Specifically check for thinking
+            if (part.message) {
+                console.log('\n[VERBOSE] Message object keys:', Object.keys(part.message));
+                
+                if (part.message.thinking !== undefined) {
+                    console.log('[VERBOSE] ✅ THINKING FIELD EXISTS!');
+                    console.log('[VERBOSE] Thinking value:', JSON.stringify(part.message.thinking));
+                    console.log('[VERBOSE] Thinking length:', part.message.thinking?.length || 0);
+                }
+                
+                if (part.message.content !== undefined) {
+                    console.log('[VERBOSE] Content value:', JSON.stringify(part.message.content));
+                    console.log('[VERBOSE] Content length:', part.message.content?.length || 0);
+                    
+                    // Check for <think> tags in content
+                    if (part.message.content.includes('<think>') || part.message.content.includes('</think>')) {
+                        console.log('[VERBOSE] ⚠️ THINK TAGS FOUND IN CONTENT!');
+                    }
+                }
+                
+                if (part.message.role) {
+                    console.log('[VERBOSE] Role:', part.message.role);
+                }
+            }
+            
+            if (part.done) {
+                console.log('\n[VERBOSE] ✅ STREAM DONE');
+                console.log('[VERBOSE] Stats:', {
+                    total_duration: part.total_duration,
+                    eval_count: part.eval_count,
+                    model: part.model
+                });
+            }
+            
+            allParts.push(part);
+        }
+        
+        console.log('\n' + '='.repeat(80));
+        console.log('[VERBOSE API TEST] SUMMARY');
+        console.log('='.repeat(80));
+        console.log('[VERBOSE] Total parts received:', allParts.length);
+        
+        // Aggregate all thinking and content
+        let totalThinking = '';
+        let totalContent = '';
+        let hasNativeThinking = false;
+        let hasThinkTags = false;
+        
+        for (const p of allParts) {
+            if (p.message?.thinking) {
+                totalThinking += p.message.thinking;
+                hasNativeThinking = true;
+            }
+            if (p.message?.content) {
+                totalContent += p.message.content;
+                if (p.message.content.includes('<think>') || p.message.content.includes('</think>')) {
+                    hasThinkTags = true;
+                }
+            }
+        }
+        
+        console.log('\n[VERBOSE] AGGREGATED RESULTS:');
+        console.log('[VERBOSE] Has native thinking field:', hasNativeThinking);
+        console.log('[VERBOSE] Has <think> tags in content:', hasThinkTags);
+        console.log('[VERBOSE] Total thinking length:', totalThinking.length);
+        console.log('[VERBOSE] Total content length:', totalContent.length);
+        
+        if (totalThinking) {
+            console.log('\n[VERBOSE] FULL THINKING:');
+            console.log('---');
+            console.log(totalThinking);
+            console.log('---');
+        }
+        
+        console.log('\n[VERBOSE] FULL CONTENT:');
+        console.log('---');
+        console.log(totalContent);
+        console.log('---');
+        
+        console.log('\n' + '='.repeat(80));
+        console.log('[VERBOSE API TEST] TEST COMPLETE');
+        console.log('='.repeat(80) + '\n');
+        
+        return {
+            success: true,
+            partsCount: allParts.length,
+            hasNativeThinking,
+            hasThinkTags,
+            thinking: totalThinking,
+            content: totalContent,
+            allParts
+        };
+        
+    } catch (error) {
+        console.error('[VERBOSE API TEST] ERROR:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
 module.exports = {
     getClient,
     setHost,
@@ -401,5 +596,6 @@ module.exports = {
     deleteModel,
     listRunning,
     extractThinkTags,
-    executeCommand
+    executeCommand,
+    verboseApiTest
 };
