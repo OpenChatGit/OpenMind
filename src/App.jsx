@@ -3,12 +3,16 @@ import TitleBar from './components/TitleBar';
 import { useTheme } from './contexts/ThemeContext';
 import { useAuth } from './contexts/AuthContext';
 import { PanelLeft } from 'lucide-react';
+import { initPluginSystem, loadPluginsWithUI } from './utils/pluginLoader';
+import { setupCacheInvalidation } from './utils/scanCache';
+import { initPopupSystem } from './utils/popupManager';
+import { initPromptSystem } from './utils/promptManager';
+import PopupContainer from './components/PopupContainer';
 
 // Lazy load heavy components for faster initial render
 const Sidebar = lazy(() => import('./components/Sidebar'));
 const ChatArea = lazy(() => import('./components/ChatArea'));
 const LoginModal = lazy(() => import('./components/LoginModal'));
-const OpenMindCreator = lazy(() => import('./components/OpenMindCreator'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 
 // Minimal loading placeholder
@@ -51,9 +55,6 @@ const App = ({ onReady }) => {
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   
-  // OpenMind Creator State
-  const [showOpenMindCreator, setShowOpenMindCreator] = useState(false);
-  
   const [appSettings, setAppSettings] = useState({
     inferenceProvider: 'local',
     hfApiKey: '',
@@ -63,6 +64,18 @@ const App = ({ onReady }) => {
 
   // Hide loading screen immediately when component mounts
   useEffect(() => {
+    // Initialize plugin system
+    initPluginSystem();
+    
+    // Initialize popup system
+    initPopupSystem();
+    
+    // Initialize prompt system
+    initPromptSystem();
+    
+    // Setup cache invalidation listeners
+    setupCacheInvalidation();
+    
     // Call onReady immediately - UI is ready to show
     onReady?.();
   }, [onReady]);
@@ -93,6 +106,15 @@ const App = ({ onReady }) => {
     
     // Load HF user
     loadHfUser();
+    
+    // Load plugins with UI from registry
+    if (window.electronAPI?.loadOnlinePluginRegistry) {
+      window.electronAPI.loadOnlinePluginRegistry().then(result => {
+        if (result?.success && result.plugins) {
+          loadPluginsWithUI({ plugins: result.plugins });
+        }
+      }).catch(() => {});
+    }
   }, []);
 
   const handleSaveSettings = async (newSettings) => {
@@ -272,7 +294,6 @@ const App = ({ onReady }) => {
                 onOpenLoginModal={handleOpenLoginModal}
                 onHfLogout={handleHfLogout}
                 onOpenSettings={() => setShowSettings(true)}
-                onOpenModelCreator={() => setShowOpenMindCreator(true)}
               />
             </div>
           </div>
@@ -345,17 +366,10 @@ const App = ({ onReady }) => {
             onSaveSettings={handleSaveSettings}
           />
         )}
-
-        {showOpenMindCreator && (
-          <OpenMindCreator
-            isOpen={showOpenMindCreator}
-            onClose={() => setShowOpenMindCreator(false)}
-            onModelCreated={(model) => {
-              console.log('OpenMind model created:', model);
-            }}
-          />
-        )}
       </Suspense>
+
+      {/* Popup System */}
+      <PopupContainer />
     </div>
   );
 };

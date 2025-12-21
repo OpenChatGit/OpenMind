@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { getDiffusionModels, getInstalledPlugins } from '../utils/scanCache';
 
 const PLUGIN_ID = 'openmind-image-gen';
 
@@ -6,6 +7,9 @@ const PLUGIN_ID = 'openmind-image-gen';
  * Hook for the Image Generation Plugin
  * Wraps the native plugin API and provides React state management
  * Plugin must be explicitly enabled in Settings > Plugins > API Plugins
+ * 
+ * IMPORTANT: Model scanning only happens when plugin is enabled AND installed
+ * to avoid unnecessary performance overhead. Uses centralized cache system.
  */
 export const useImageGenPlugin = () => {
   const [enabled, setEnabled] = useState(false);
@@ -14,6 +18,10 @@ export const useImageGenPlugin = () => {
   const [selectedModel, setSelectedModel] = useState('');
   const [progress, setProgress] = useState('');
   const [pluginLoaded, setPluginLoaded] = useState(false);
+  
+  // Track if we've already checked/loaded to avoid repeated calls
+  const checkedRef = useRef(false);
+  const modelsLoadedRef = useRef(false);
 
   // Check if plugin is enabled in localStorage AND actually installed (code exists)
   const checkPluginEnabled = useCallback(async () => {
@@ -23,17 +31,15 @@ export const useImageGenPlugin = () => {
         return false;
       }
       
-      // Check if plugin code is actually installed (not just in registry)
-      const installedCheck = await window.electronAPI?.checkInstalledPlugins?.();
-      if (installedCheck?.success && installedCheck.installedPluginIds) {
-        const isInstalled = installedCheck.installedPluginIds.includes(PLUGIN_ID);
-        if (!isInstalled) {
-          // Plugin code doesn't exist, clean up localStorage
-          console.log('[ImageGenPlugin] Plugin not installed, cleaning up localStorage');
-          const newEnabled = enabledPlugins.filter(id => id !== PLUGIN_ID);
-          localStorage.setItem('enabled-native-plugins', JSON.stringify(newEnabled));
-          return false;
-        }
+      // Check if plugin code is actually installed (uses cached result)
+      const installedPluginIds = await getInstalledPlugins();
+      const isInstalled = installedPluginIds.includes(PLUGIN_ID);
+      
+      if (!isInstalled) {
+        // Plugin code doesn't exist, clean up localStorage
+        const newEnabled = enabledPlugins.filter(id => id !== PLUGIN_ID);
+        localStorage.setItem('enabled-native-plugins', JSON.stringify(newEnabled));
+        return false;
       }
       
       return true;
@@ -43,8 +49,13 @@ export const useImageGenPlugin = () => {
     }
   }, []);
 
-  // Load models from plugin (defined before useEffect that uses it)
-  const loadModels = useCallback(async () => {
+  // Load models from plugin - ONLY called when plugin is confirmed enabled
+  const loadModels = useCallback(async (force = false) => {
+    // Prevent repeated model loading unless forced
+    if (modelsLoadedRef.current && !force) {
+      return;
+    }
+    
     try {
       // Try plugin first
       const result = await window.electronAPI?.nativePluginCall?.(
@@ -56,14 +67,15 @@ export const useImageGenPlugin = () => {
       if (result?.success && result.result?.length > 0) {
         setModels(result.result);
         setSelectedModel(prev => prev || result.result[0].name || result.result[0].id);
+        modelsLoadedRef.current = true;
         return;
       }
       
-      // Fallback to direct scan
-      const scanResult = await window.electronAPI?.scanDiffusionModels?.();
-      if (scanResult?.success && scanResult.models?.length > 0) {
-        setModels(scanResult.models);
-        setSelectedModel(prev => prev || scanResult.models[0].name);
+      // Fallback to cached diffusion models scan
+      const cachedModels = await getDiffusionModels(force);
+      if (cachedModels?.length > 0) {
+        setModels(cachedModels);
+        setSelectedModel(prev => prev || cachedModels[0].name);
       } else {
         // Default models
         setModels([{ 
@@ -74,13 +86,18 @@ export const useImageGenPlugin = () => {
         }]);
         setSelectedModel(prev => prev || 'SDXL-Turbo (Download)');
       }
+      modelsLoadedRef.current = true;
     } catch (error) {
       console.error('[ImageGenPlugin] Load models error:', error);
     }
   }, []);
 
-  // Check if plugin is enabled and load models
+  // Check if plugin is enabled - runs once on mount
   useEffect(() => {
+    // Prevent double-checking
+    if (checkedRef.current) return;
+    checkedRef.current = true;
+    
     const checkPlugin = async () => {
       // Check if plugin is enabled in settings AND exists in registry
       const isEnabled = await checkPluginEnabled();
@@ -95,6 +112,7 @@ export const useImageGenPlugin = () => {
       const hasImageGen = !!window.electronAPI?.generateImage;
       if (hasImageGen) {
         setPluginLoaded(true);
+        // Only load models when plugin is confirmed enabled
         await loadModels();
       } else {
         setPluginLoaded(false);
@@ -102,8 +120,10 @@ export const useImageGenPlugin = () => {
     };
     
     checkPlugin();
-    
-    // Listen for plugin state changes
+  }, [checkPluginEnabled, loadModels]);
+
+  // Listen for plugin state changes (separate effect)
+  useEffect(() => {
     const handlePluginChange = async (event) => {
       if (event.detail?.pluginId === PLUGIN_ID) {
         if (event.detail.enabled) {
@@ -111,11 +131,16 @@ export const useImageGenPlugin = () => {
           const isValid = await checkPluginEnabled();
           if (isValid) {
             setPluginLoaded(true);
-            loadModels();
+            // Force reload models when plugin is re-enabled
+            modelsLoadedRef.current = false;
+            loadModels(true);
           }
         } else {
           setPluginLoaded(false);
           setEnabled(false);
+          // Clear models when disabled
+          setModels([]);
+          modelsLoadedRef.current = false;
         }
       }
     };
@@ -142,6 +167,10 @@ export const useImageGenPlugin = () => {
   const generate = useCallback(async (prompt, options = {}) => {
     if (!prompt?.trim()) {
       return { success: false, error: 'Prompt is required' };
+    }
+    
+    if (!pluginLoaded) {
+      return { success: false, error: 'Image generation plugin not loaded' };
     }
     
     setIsGenerating(true);
@@ -180,7 +209,7 @@ export const useImageGenPlugin = () => {
       setIsGenerating(false);
       setProgress('');
     }
-  }, [models, selectedModel]);
+  }, [models, selectedModel, pluginLoaded]);
 
   // Select model
   const selectModel = useCallback((modelName) => {
@@ -201,7 +230,7 @@ export const useImageGenPlugin = () => {
     setEnabled,
     generate,
     selectModel,
-    loadModels,
+    loadModels: useCallback(() => loadModels(true), [loadModels]), // Always force when called externally
   };
 };
 

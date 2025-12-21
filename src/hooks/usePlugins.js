@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { loadPlugin, unloadPlugin, getLoadedPlugins, isPluginLoaded } from '../utils/pluginLoader';
+import { getPluginRegistry } from '../utils/scanCache';
 
 /**
  * Hook to manage UI plugins
  * Loads plugins when their Docker containers are running
+ * Uses centralized cache for plugin registry
  */
 export function usePlugins(installedContainers = []) {
   const [plugins, setPlugins] = useState([]);
@@ -11,17 +13,10 @@ export function usePlugins(installedContainers = []) {
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(new Set());
 
-  // Fetch plugin registry
+  // Fetch plugin registry using centralized cache
   const fetchPluginRegistry = useCallback(async () => {
-    try {
-      const result = await window.electronAPI?.loadOnlinePluginRegistry();
-      if (result?.success) {
-        return result.plugins || [];
-      }
-    } catch (err) {
-      console.error('Failed to fetch plugin registry:', err);
-    }
-    return [];
+    const result = await getPluginRegistry();
+    return result?.plugins || [];
   }, []);
 
   // Check if a plugin's container is running

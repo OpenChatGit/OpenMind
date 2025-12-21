@@ -3,9 +3,6 @@ import { createPortal } from 'react-dom';
 import {
   BookOpen,
   X,
-  Zap,
-  ChevronDown,
-  ChevronRight,
   HardDrive,
   Cloud,
   Brain,
@@ -14,20 +11,19 @@ import {
   Shield,
   DollarSign,
   WifiOff,
-  Search,
   Download,
   Puzzle,
   Package,
   Code,
   FileJson,
-  Image,
+  Zap,
+  ImageIcon,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const DocsModal = memo(({ isOpen, onClose }) => {
   const { theme, isDark } = useTheme();
   const [activeSection, setActiveSection] = useState('about');
-  const [discoveryExpanded, setDiscoveryExpanded] = useState(true);
 
   if (!isOpen) return null;
 
@@ -141,80 +137,23 @@ const DocsModal = memo(({ isOpen, onClose }) => {
               theme={theme}
             />
 
-            {/* OpenMind Create Dropdown */}
-            <div>
-              <button
-                onClick={() => setDiscoveryExpanded(!discoveryExpanded)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  width: '100%',
-                  padding: '10px 12px',
-                  background:
-                    activeSection === 'local' || activeSection === 'cloud'
-                      ? theme.bgActive
-                      : 'transparent',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color:
-                    activeSection === 'local' || activeSection === 'cloud'
-                      ? theme.text
-                      : theme.textSecondary,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  fontWeight: '500',
-                  textAlign: 'left',
-                }}
-                onMouseEnter={(e) => {
-                  if (activeSection !== 'local' && activeSection !== 'cloud') {
-                    e.currentTarget.style.background = theme.bgHover;
-                    e.currentTarget.style.color = theme.text;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activeSection !== 'local' && activeSection !== 'cloud') {
-                    e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.color = theme.textSecondary;
-                  }
-                }}
-              >
-                <Zap size={18} />
-                <span style={{ flex: 1 }}>OpenMind Create</span>
-                {discoveryExpanded ? (
-                  <ChevronDown size={16} />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
-              </button>
+            {/* Local Models */}
+            <NavButton
+              icon={HardDrive}
+              label="Local Models"
+              isActive={activeSection === 'local'}
+              onClick={() => setActiveSection('local')}
+              theme={theme}
+            />
 
-              {discoveryExpanded && (
-                <div
-                  style={{
-                    marginLeft: '12px',
-                    marginTop: '4px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                  }}
-                >
-                  <SubNavButton
-                    icon={HardDrive}
-                    label="Local Models"
-                    isActive={activeSection === 'local'}
-                    onClick={() => setActiveSection('local')}
-                    theme={theme}
-                  />
-                  <SubNavButton
-                    icon={Cloud}
-                    label="Cloud Models"
-                    isActive={activeSection === 'cloud'}
-                    onClick={() => setActiveSection('cloud')}
-                    theme={theme}
-                  />
-                </div>
-              )}
-            </div>
+            {/* Cloud/HuggingFace */}
+            <NavButton
+              icon={Cloud}
+              label="Cloud & HuggingFace"
+              isActive={activeSection === 'cloud'}
+              onClick={() => setActiveSection('cloud')}
+              theme={theme}
+            />
           </div>
 
           {/* Content */}
@@ -268,42 +207,6 @@ const NavButton = ({ icon: Icon, label, isActive, onClick, theme }) => (
   </button>
 );
 
-// Sub Navigation Button Component
-const SubNavButton = ({ icon: Icon, label, isActive, onClick, theme }) => (
-  <button
-    onClick={onClick}
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      padding: '8px 12px',
-      background: isActive ? theme.bgActive : 'transparent',
-      border: 'none',
-      borderRadius: '4px',
-      color: isActive ? theme.text : theme.textSecondary,
-      cursor: 'pointer',
-      fontSize: '0.85rem',
-      textAlign: 'left',
-      width: '100%',
-    }}
-    onMouseEnter={(e) => {
-      if (!isActive) {
-        e.currentTarget.style.background = theme.bgHover;
-        e.currentTarget.style.color = theme.text;
-      }
-    }}
-    onMouseLeave={(e) => {
-      if (!isActive) {
-        e.currentTarget.style.background = 'transparent';
-        e.currentTarget.style.color = theme.textSecondary;
-      }
-    }}
-  >
-    <Icon size={14} />
-    {label}
-  </button>
-);
-
 // About Section
 const AboutSection = ({ theme }) => (
   <div style={{ color: theme.textSecondary, lineHeight: '1.7' }}>
@@ -323,8 +226,8 @@ const AboutSection = ({ theme }) => (
     <p style={{ margin: '0 0 20px 0' }}>
       OpenMind is a powerful, privacy-first AI assistant that runs entirely on
       your machine. Chat with local LLMs, generate images, search the web
-      intelligently, and create custom AI models — all without sending your data
-      to the cloud.
+      intelligently, and extend functionality with plugins — all without sending 
+      your data to the cloud.
     </p>
 
     <h3
@@ -361,12 +264,8 @@ const AboutSection = ({ theme }) => (
         Diffusion
       </li>
       <li style={{ marginBottom: '8px' }}>
-        <strong>OpenMind Create</strong> — Build custom AI assistants with your
-        own prompts
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        <strong>Docker Integration</strong> — Manage containers for services
-        like SearXNG
+        <strong>Plugin System</strong> — Extend functionality with native plugins
+        that add UI elements dynamically
       </li>
     </ul>
 
@@ -403,7 +302,7 @@ const AboutSection = ({ theme }) => (
     </h3>
     <p style={{ margin: '0' }}>
       OpenMind is open source and community-driven. Built with Electron, React,
-      and modern web technologies.
+      and modern web technologies. Contributions welcome!
     </p>
   </div>
 );
@@ -423,35 +322,62 @@ const LocalModelsSection = ({ theme }) => (
       }}
     >
       <HardDrive size={24} color={theme.accent} />
-      Local Models & Ollama
+      Local Models
     </h2>
-
-    <h3
-      style={{
-        margin: '0 0 12px 0',
-        fontSize: '1.1rem',
-        color: theme.text,
-        fontWeight: '600',
-      }}
-    >
-      Ollama Integration
-    </h3>
-    <p style={{ margin: '0 0 16px 0' }}>
-      OpenMind includes a bundled Ollama server that starts automatically. You
-      can also connect to an external Ollama instance.
+    
+    <p style={{ margin: '0 0 20px 0' }}>
+      OpenMind runs AI models entirely on your machine. No cloud, no API keys, 
+      complete privacy. Connect to Ollama to run models locally.
     </p>
-    <ul style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-      <li style={{ marginBottom: '8px' }}>
-        Check connection status in the sidebar (green = connected)
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Start/stop the bundled server with the play/stop buttons
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Pull new models directly from the model selector
-      </li>
-    </ul>
 
+    {/* Ollama Setup */}
+    <div style={{
+      background: theme.bgTertiary,
+      borderRadius: '8px',
+      padding: '16px',
+      marginBottom: '16px',
+    }}>
+      <h3
+        style={{
+          margin: '0 0 12px 0',
+          fontSize: '1rem',
+          color: theme.text,
+          fontWeight: '600',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+      >
+        <Download size={18} color={theme.accent} />
+        Setup Ollama
+      </h3>
+      <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem' }}>
+        OpenMind connects to Ollama for local inference. Install Ollama first:
+      </p>
+      <ol style={{ margin: '0 0 12px 0', paddingLeft: '20px', fontSize: '0.9rem' }}>
+        <li style={{ marginBottom: '6px' }}>
+          Download from <strong>ollama.com</strong>
+        </li>
+        <li style={{ marginBottom: '6px' }}>
+          Install and run Ollama
+        </li>
+        <li style={{ marginBottom: '6px' }}>
+          OpenMind will auto-connect when Ollama is running
+        </li>
+      </ol>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.85rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+          <span>Green indicator = Connected</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+          <span>Red indicator = Not connected</span>
+        </div>
+      </div>
+    </div>
+
+    {/* Pull Models */}
     <h3
       style={{
         margin: '0 0 12px 0',
@@ -460,30 +386,19 @@ const LocalModelsSection = ({ theme }) => (
         fontWeight: '600',
       }}
     >
-      GGUF Models
+      Downloading Models
     </h3>
-    <p style={{ margin: '0 0 16px 0' }}>
-      Run any GGUF model file directly with the built-in llama.cpp backend.
-      Perfect for models not available on Ollama.
+    <p style={{ margin: '0 0 12px 0' }}>
+      Pull models directly from the model selector dropdown:
     </p>
     <ol style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-      <li style={{ marginBottom: '8px' }}>
-        Open <strong>OpenMind Create</strong> from the sidebar
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Go to <strong>Discovery → Local</strong>
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Import a .gguf file or download from HuggingFace
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Configure name, system prompt, and parameters
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Click <strong>Create Model</strong> to add it to your library
-      </li>
+      <li style={{ marginBottom: '6px' }}>Click the model selector in the chat</li>
+      <li style={{ marginBottom: '6px' }}>Select "Pull new model"</li>
+      <li style={{ marginBottom: '6px' }}>Enter a model name (e.g. <code style={{ background: theme.bgTertiary, padding: '2px 6px', borderRadius: '4px' }}>llama3.2</code>)</li>
+      <li style={{ marginBottom: '6px' }}>Wait for download to complete</li>
     </ol>
 
+    {/* Popular Models */}
     <h3
       style={{
         margin: '0 0 12px 0',
@@ -492,53 +407,65 @@ const LocalModelsSection = ({ theme }) => (
         fontWeight: '600',
       }}
     >
-      Benefits
+      Popular Models
     </h3>
-    <ul style={{ margin: '0', paddingLeft: '20px' }}>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <Shield size={16} color="#22c55e" /> Complete privacy — your data never
-        leaves your machine
-      </li>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <DollarSign size={16} color="#22c55e" /> No API costs — run unlimited
-        queries for free
-      </li>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <WifiOff size={16} color="#22c55e" /> Works offline — no internet
-        connection required
-      </li>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <Zap size={16} color="#22c55e" /> Fast responses — no network latency
-      </li>
-    </ul>
+    <div style={{ 
+      display: 'grid', 
+      gridTemplateColumns: 'repeat(2, 1fr)', 
+      gap: '8px',
+      marginBottom: '20px'
+    }}>
+      {[
+        { name: 'llama3.2', desc: 'Latest Llama, fast & capable' },
+        { name: 'mistral', desc: 'Great for coding tasks' },
+        { name: 'gemma2', desc: 'Google\'s efficient model' },
+        { name: 'qwen3', desc: 'Strong multilingual support' },
+      ].map(({ name, desc }) => (
+        <div key={name} style={{ 
+          background: theme.bgTertiary, 
+          padding: '10px 12px', 
+          borderRadius: '6px',
+        }}>
+          <code style={{ color: theme.accent, fontSize: '0.9rem' }}>{name}</code>
+          <div style={{ color: theme.textMuted, fontSize: '0.8rem', marginTop: '2px' }}>{desc}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* Benefits */}
+    <h3
+      style={{
+        margin: '0 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+      }}
+    >
+      Why Local?
+    </h3>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+      {[
+        { icon: Shield, color: '#22c55e', title: 'Privacy', desc: 'Data stays on your machine' },
+        { icon: DollarSign, color: '#22c55e', title: 'Free', desc: 'No API costs ever' },
+        { icon: WifiOff, color: '#22c55e', title: 'Offline', desc: 'Works without internet' },
+        { icon: Zap, color: '#22c55e', title: 'Fast', desc: 'No network latency' },
+      ].map(({ icon: Icon, color, title, desc }) => (
+        <div key={title} style={{ 
+          display: 'flex', 
+          alignItems: 'flex-start', 
+          gap: '10px',
+          padding: '10px',
+          background: theme.bgTertiary,
+          borderRadius: '6px',
+        }}>
+          <Icon size={18} color={color} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <div style={{ color: theme.text, fontWeight: '500', fontSize: '0.9rem' }}>{title}</div>
+            <div style={{ color: theme.textMuted, fontSize: '0.8rem' }}>{desc}</div>
+          </div>
+        </div>
+      ))}
+    </div>
   </div>
 );
 
@@ -557,11 +484,30 @@ const PluginsSection = ({ theme }) => (
       }}
     >
       <Puzzle size={24} color={theme.accent} />
-      Docker Plugins
+      Native Plugin System
     </h2>
+    
+    {/* Experimental Notice */}
+    <div style={{ 
+      marginBottom: '20px',
+      padding: '10px 14px',
+      background: '#f59e0b15',
+      borderRadius: '8px',
+      borderLeft: '3px solid #f59e0b',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+    }}>
+      <Sparkles size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
+      <p style={{ margin: 0, fontSize: '0.85rem', color: theme.textSecondary }}>
+        <strong style={{ color: '#f59e0b' }}>Experimental</strong> — The plugin system is still in development. APIs may change in future updates.
+      </p>
+    </div>
+    
     <p style={{ margin: '0 0 20px 0' }}>
-      OpenMind supports Docker-based plugins that extend functionality. Install
-      official plugins from the Plugin Store or create your own.
+      OpenMind uses a dynamic plugin system that automatically places UI elements 
+      in defined slots. Plugins can add buttons, toggles and more 
+      — without modifying the main code.
     </p>
 
     <h3
@@ -579,16 +525,16 @@ const PluginsSection = ({ theme }) => (
     </h3>
     <ol style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
       <li style={{ marginBottom: '8px' }}>
-        Go to <strong>Settings → Docker → Plugin Store</strong>
+        Go to <strong>Settings → Plugins</strong>
       </li>
       <li style={{ marginBottom: '8px' }}>
         Browse available plugins (verified by OpenMindLabs)
       </li>
       <li style={{ marginBottom: '8px' }}>
-        Click <strong>Install</strong> to download and start the container
+        Click <strong>Install</strong> to download the plugin
       </li>
       <li style={{ marginBottom: '8px' }}>
-        Use <strong>Start/Stop</strong> buttons to manage running plugins
+        Enable/disable plugins with the toggle switch
       </li>
     </ol>
 
@@ -603,61 +549,10 @@ const PluginsSection = ({ theme }) => (
         gap: '8px',
       }}
     >
-      <Code size={20} color={theme.accent} /> Creating Custom Plugins
+      <Package size={20} color={theme.accent} /> Plugin Structure
     </h3>
     <p style={{ margin: '0 0 12px 0' }}>
-      Create your own plugins by building a Docker image with OpenMind labels:
-    </p>
-    <div
-      style={{
-        background: theme.bgTertiary,
-        borderRadius: '8px',
-        padding: '14px',
-        fontFamily: 'monospace',
-        fontSize: '0.85rem',
-        marginBottom: '16px',
-        overflowX: 'auto',
-      }}
-    >
-      <div style={{ color: theme.textMuted }}># Dockerfile</div>
-      <div>FROM your-base-image:latest</div>
-      <br />
-      <div style={{ color: theme.textMuted }}># Required OpenMind labels</div>
-      <div>
-        LABEL <span style={{ color: '#22c55e' }}>com.openmind.plugin</span>
-        ="true"
-      </div>
-      <div>
-        LABEL <span style={{ color: '#22c55e' }}>com.openmind.plugin.id</span>
-        ="my-plugin"
-      </div>
-      <div>
-        LABEL <span style={{ color: '#22c55e' }}>com.openmind.plugin.name</span>
-        ="My Plugin"
-      </div>
-      <div>
-        LABEL{' '}
-        <span style={{ color: '#22c55e' }}>com.openmind.plugin.version</span>
-        ="1.0.0"
-      </div>
-    </div>
-
-    <h3
-      style={{
-        margin: '0 0 12px 0',
-        fontSize: '1.1rem',
-        color: theme.text,
-        fontWeight: '600',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-      }}
-    >
-      <FileJson size={20} color={theme.accent} /> Registry Format
-    </h3>
-    <p style={{ margin: '0 0 12px 0' }}>
-      To add your plugin to the store, submit a PR to the{' '}
-      <strong>OpenMindLabs-Plugins</strong> repository with this format:
+      A plugin consists of at least a <code style={{ background: theme.bgTertiary, padding: '2px 6px', borderRadius: '4px' }}>manifest.json</code>:
     </p>
     <div
       style={{
@@ -670,6 +565,7 @@ const PluginsSection = ({ theme }) => (
         overflowX: 'auto',
       }}
     >
+      <div style={{ color: theme.textMuted }}>plugins/my-plugin/manifest.json</div>
       <div>{'{'}</div>
       <div style={{ paddingLeft: '16px' }}>
         "id": <span style={{ color: '#f59e0b' }}>"my-plugin"</span>,
@@ -678,22 +574,29 @@ const PluginsSection = ({ theme }) => (
         "name": <span style={{ color: '#f59e0b' }}>"My Plugin"</span>,
       </div>
       <div style={{ paddingLeft: '16px' }}>
-        "description": <span style={{ color: '#f59e0b' }}>"What it does"</span>,
+        "type": <span style={{ color: '#f59e0b' }}>"native"</span>,
       </div>
       <div style={{ paddingLeft: '16px' }}>
-        "image":{' '}
-        <span style={{ color: '#f59e0b' }}>"username/image:latest"</span>,
+        "ui": {'{'}
       </div>
-      <div style={{ paddingLeft: '16px' }}>
-        "containerName":{' '}
-        <span style={{ color: '#f59e0b' }}>"openmind-my-plugin"</span>,
+      <div style={{ paddingLeft: '32px' }}>
+        "slots": {'{'}
       </div>
-      <div style={{ paddingLeft: '16px' }}>
-        "ports": {'{'} "8080": "80" {'}'},
+      <div style={{ paddingLeft: '48px' }}>
+        "chat-input-left": {'{'}
       </div>
-      <div style={{ paddingLeft: '16px' }}>
-        "official": <span style={{ color: '#3b82f6' }}>false</span>
+      <div style={{ paddingLeft: '64px' }}>
+        "type": <span style={{ color: '#f59e0b' }}>"toggle-button"</span>,
       </div>
+      <div style={{ paddingLeft: '64px' }}>
+        "icon": <span style={{ color: '#f59e0b' }}>"Sparkles"</span>,
+      </div>
+      <div style={{ paddingLeft: '64px' }}>
+        "tooltip": <span style={{ color: '#f59e0b' }}>"Toggle Feature"</span>
+      </div>
+      <div style={{ paddingLeft: '48px' }}>{'}'}</div>
+      <div style={{ paddingLeft: '32px' }}>{'}'}</div>
+      <div style={{ paddingLeft: '16px' }}>{'}'}</div>
       <div>{'}'}</div>
     </div>
 
@@ -708,25 +611,263 @@ const PluginsSection = ({ theme }) => (
         gap: '8px',
       }}
     >
-      <Image size={20} color={theme.accent} /> Custom Icons
+      <Code size={20} color={theme.accent} /> Available UI Slots
     </h3>
-    <p style={{ margin: '0 0 12px 0' }}>
-      Plugins can have custom icons with Dark/Light mode support:
-    </p>
+    <div style={{ 
+      display: 'grid', 
+      gridTemplateColumns: 'repeat(2, 1fr)', 
+      gap: '8px',
+      marginBottom: '20px'
+    }}>
+      {[
+        { slot: 'chat-input-left', desc: 'Left of chat input' },
+        { slot: 'chat-input-right', desc: 'Right of send button' },
+        { slot: 'chat-input-above', desc: 'Above chat input' },
+        { slot: 'chat-toolbar', desc: 'Main toolbar' },
+        { slot: 'sidebar-top', desc: 'Top of sidebar' },
+        { slot: 'sidebar-bottom', desc: 'Bottom of sidebar' },
+        { slot: 'message-actions', desc: 'On messages' },
+        { slot: 'settings-tab', desc: 'Custom settings tab' },
+      ].map(({ slot, desc }) => (
+        <div key={slot} style={{ 
+          background: theme.bgTertiary, 
+          padding: '8px 12px', 
+          borderRadius: '6px',
+          fontSize: '0.85rem'
+        }}>
+          <code style={{ color: theme.accent }}>{slot}</code>
+          <div style={{ color: theme.textMuted, fontSize: '0.8rem' }}>{desc}</div>
+        </div>
+      ))}
+    </div>
+
+    <h3
+      style={{
+        margin: '0 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      <FileJson size={20} color={theme.accent} /> Element Types
+    </h3>
     <ul style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
       <li style={{ marginBottom: '8px' }}>
-        <strong>iconUrl</strong> — Default icon (used for both modes)
+        <strong>toggle-button</strong> — Button that toggles between active/inactive
       </li>
       <li style={{ marginBottom: '8px' }}>
-        <strong>iconUrlDark</strong> — Icon for Dark mode
+        <strong>action-button</strong> — Button for one-time actions
       </li>
       <li style={{ marginBottom: '8px' }}>
-        <strong>iconUrlLight</strong> — Icon for Light mode
+        <strong>hold-button</strong> — Button that must be held (e.g. voice recording)
+      </li>
+      <li style={{ marginBottom: '8px' }}>
+        <strong>indicator</strong> — Display only, no click
       </li>
     </ul>
-    <p style={{ margin: '0', fontSize: '0.9rem', color: theme.textMuted }}>
-      Icons should be PNG or SVG, recommended size 64x64 or 128x128 pixels.
+
+    <h3
+      style={{
+        margin: '0 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      <ImageIcon size={20} color={theme.accent} /> Icons
+    </h3>
+    <p style={{ margin: '0 0 12px 0' }}>
+      All 500+ <strong>Lucide Icons</strong> are available. Use the PascalCase name:
     </p>
+    <div style={{ 
+      display: 'flex', 
+      flexWrap: 'wrap', 
+      gap: '8px',
+      marginBottom: '20px'
+    }}>
+      {['Sparkles', 'Radar', 'Image', 'Mic', 'Search', 'Brain', 'Zap', 'Settings'].map(icon => (
+        <code key={icon} style={{ 
+          background: theme.bgTertiary, 
+          padding: '4px 8px', 
+          borderRadius: '4px',
+          fontSize: '0.8rem'
+        }}>{icon}</code>
+      ))}
+    </div>
+
+    <h3
+      style={{
+        margin: '0 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      <Code size={20} color={theme.accent} /> Plugin with Logic (index.js)
+    </h3>
+    <p style={{ margin: '0 0 12px 0' }}>
+      For advanced functionality, add an <code style={{ background: theme.bgTertiary, padding: '2px 6px', borderRadius: '4px' }}>index.js</code>:
+    </p>
+    <div
+      style={{
+        background: theme.bgTertiary,
+        borderRadius: '8px',
+        padding: '14px',
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        marginBottom: '20px',
+        overflowX: 'auto',
+      }}
+    >
+      <div style={{ color: theme.textMuted }}>// index.js</div>
+      <div>module.exports = {'{'}</div>
+      <div style={{ paddingLeft: '16px' }}>init(ctx) {'{'}</div>
+      <div style={{ paddingLeft: '32px' }}>
+        ctx.on(<span style={{ color: '#f59e0b' }}>'ui-click'</span>, (data) ={'>'} {'{'})
+      </div>
+      <div style={{ paddingLeft: '48px' }}>
+        ctx.popup.toast(<span style={{ color: '#f59e0b' }}>'Clicked!'</span>, {'{'} type: <span style={{ color: '#f59e0b' }}>'success'</span> {'}'});
+      </div>
+      <div style={{ paddingLeft: '32px' }}>{'}'});</div>
+      <div style={{ paddingLeft: '16px' }}>{'}'}</div>
+      <div>{'}'}</div>
+    </div>
+
+    <h3
+      style={{
+        margin: '0 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      <Package size={20} color={theme.accent} /> Popup/Dialog API
+    </h3>
+    <p style={{ margin: '0 0 12px 0' }}>
+      Plugins can show styled dialogs instead of browser defaults:
+    </p>
+    <div style={{ 
+      display: 'grid', 
+      gridTemplateColumns: 'repeat(2, 1fr)', 
+      gap: '8px',
+      marginBottom: '20px'
+    }}>
+      {[
+        { method: 'ctx.popup.alert()', desc: 'Simple message dialog' },
+        { method: 'ctx.popup.confirm()', desc: 'Yes/No decision' },
+        { method: 'ctx.popup.prompt()', desc: 'Text input dialog' },
+        { method: 'ctx.popup.toast()', desc: 'Brief notification' },
+      ].map(({ method, desc }) => (
+        <div key={method} style={{ 
+          background: theme.bgTertiary, 
+          padding: '8px 12px', 
+          borderRadius: '6px',
+          fontSize: '0.85rem'
+        }}>
+          <code style={{ color: theme.accent }}>{method}</code>
+          <div style={{ color: theme.textMuted, fontSize: '0.8rem' }}>{desc}</div>
+        </div>
+      ))}
+    </div>
+    <div
+      style={{
+        background: theme.bgTertiary,
+        borderRadius: '8px',
+        padding: '14px',
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        marginBottom: '16px',
+        overflowX: 'auto',
+      }}
+    >
+      <div style={{ color: theme.textMuted }}>// Example usage</div>
+      <div>const confirmed = await ctx.popup.confirm(<span style={{ color: '#f59e0b' }}>'Delete item?'</span>, {'{'}</div>
+      <div style={{ paddingLeft: '16px' }}>title: <span style={{ color: '#f59e0b' }}>'Confirm'</span>,</div>
+      <div style={{ paddingLeft: '16px' }}>confirmColor: <span style={{ color: '#f59e0b' }}>'danger'</span></div>
+      <div>{'}'});</div>
+    </div>
+
+    <h3
+      style={{
+        margin: '20px 0 12px 0',
+        fontSize: '1.1rem',
+        color: theme.text,
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}
+    >
+      <Code size={20} color={theme.accent} /> System Prompt API
+    </h3>
+    <p style={{ margin: '0 0 12px 0' }}>
+      Plugins can register system prompts that get merged with the main prompt:
+    </p>
+    <div style={{ 
+      display: 'grid', 
+      gridTemplateColumns: 'repeat(2, 1fr)', 
+      gap: '8px',
+      marginBottom: '20px'
+    }}>
+      {[
+        { method: 'ctx.prompt.register()', desc: 'Add system prompt' },
+        { method: 'ctx.prompt.update()', desc: 'Update prompt' },
+        { method: 'ctx.prompt.setEnabled()', desc: 'Toggle on/off' },
+        { method: 'ctx.prompt.unregister()', desc: 'Remove prompt' },
+      ].map(({ method, desc }) => (
+        <div key={method} style={{ 
+          background: theme.bgTertiary, 
+          padding: '8px 12px', 
+          borderRadius: '6px',
+          fontSize: '0.85rem'
+        }}>
+          <code style={{ color: theme.accent }}>{method}</code>
+          <div style={{ color: theme.textMuted, fontSize: '0.8rem' }}>{desc}</div>
+        </div>
+      ))}
+    </div>
+    <div
+      style={{
+        background: theme.bgTertiary,
+        borderRadius: '8px',
+        padding: '14px',
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        marginBottom: '16px',
+        overflowX: 'auto',
+      }}
+    >
+      <div style={{ color: theme.textMuted }}>// Register a system prompt</div>
+      <div>ctx.prompt.register({'{'}</div>
+      <div style={{ paddingLeft: '16px' }}>prompt: <span style={{ color: '#f59e0b' }}>'You can generate images...'</span>,</div>
+      <div style={{ paddingLeft: '16px' }}>priority: <span style={{ color: '#3b82f6' }}>80</span>,</div>
+      <div style={{ paddingLeft: '16px' }}>position: <span style={{ color: '#f59e0b' }}>'after'</span></div>
+      <div>{'}'});</div>
+    </div>
+
+    <div style={{ 
+      marginTop: '20px',
+      padding: '12px 16px',
+      background: `${theme.accent}15`,
+      borderRadius: '8px',
+      borderLeft: `3px solid ${theme.accent}`,
+    }}>
+      <p style={{ margin: 0, fontSize: '0.9rem', color: theme.textSecondary }}>
+        <strong style={{ color: theme.text }}>More coming soon!</strong> We're actively expanding the plugin API with new slots, events, and capabilities.
+      </p>
+    </div>
   </div>
 );
 
@@ -745,112 +886,65 @@ const CloudSection = ({ theme }) => (
       }}
     >
       <Cloud size={24} color={theme.accent} />
-      HuggingFace & Cloud Features
+      Cloud & HuggingFace
     </h2>
 
-    <h3
-      style={{
-        margin: '0 0 12px 0',
-        fontSize: '1.1rem',
+    {/* Coming Soon Notice */}
+    <div style={{ 
+      padding: '40px 20px',
+      textAlign: 'center',
+    }}>
+      <div style={{
+        width: '80px',
+        height: '80px',
+        borderRadius: '50%',
+        background: '#f59e0b15',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        margin: '0 auto 20px',
+      }}>
+        <Sparkles size={36} color="#f59e0b" />
+      </div>
+      
+      <h3 style={{ 
+        margin: '0 0 12px 0', 
+        fontSize: '1.2rem', 
         color: theme.text,
-        fontWeight: '600',
-      }}
-    >
-      HuggingFace Integration
-    </h3>
-    <p style={{ margin: '0 0 16px 0' }}>
-      Connect your HuggingFace account to browse, download, and manage models
-      from the Hub. Access thousands of community models directly in OpenMind.
-    </p>
-    <ol style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-      <li style={{ marginBottom: '8px' }}>
-        Go to <strong>Account Settings → Connections</strong>
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Click <strong>Connect</strong> under HuggingFace
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Enter your HuggingFace access token
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Browse models in <strong>OpenMind Create → Discovery → Cloud</strong>
-      </li>
-    </ol>
+        fontWeight: '600'
+      }}>
+        Coming Soon
+      </h3>
+      
+      <p style={{ 
+        margin: '0 0 24px 0', 
+        color: theme.textSecondary,
+        maxWidth: '400px',
+        marginLeft: 'auto',
+        marginRight: 'auto',
+      }}>
+        Cloud features including HuggingFace integration, Deep Search, and Docker services are being redesigned for a better experience.
+      </p>
 
-    <h3
-      style={{
-        margin: '0 0 12px 0',
-        fontSize: '1.1rem',
-        color: theme.text,
-        fontWeight: '600',
-      }}
-    >
-      Deep Search
-    </h3>
-    <p style={{ margin: '0 0 16px 0' }}>
-      AI-powered web research using SearXNG. Deep Search finds relevant
-      information and synthesizes it into comprehensive answers.
-    </p>
-    <ul style={{ margin: '0 0 20px 0', paddingLeft: '20px' }}>
-      <li style={{ marginBottom: '8px' }}>
-        Requires Docker to run the SearXNG container
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Enable in chat with the Deep Search toggle
-      </li>
-      <li style={{ marginBottom: '8px' }}>
-        Searches multiple sources and summarizes results
-      </li>
-    </ul>
-
-    <h3
-      style={{
-        margin: '0 0 12px 0',
-        fontSize: '1.1rem',
-        color: theme.text,
-        fontWeight: '600',
-      }}
-    >
-      Docker Services
-    </h3>
-    <p style={{ margin: '0 0 16px 0' }}>
-      Some features require Docker Desktop. Manage containers from{' '}
-      <strong>Settings → Docker</strong>.
-    </p>
-    <ul style={{ margin: '0', paddingLeft: '20px' }}>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <Search size={16} color={theme.accent} /> SearXNG for Deep Search
-      </li>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <Download size={16} color={theme.accent} /> Start, stop, and restart
-        containers
-      </li>
-      <li
-        style={{
-          marginBottom: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <Globe size={16} color={theme.accent} /> Click port links to open
-        services in browser
-      </li>
-    </ul>
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '8px',
+        justifyContent: 'center',
+      }}>
+        {['HuggingFace Hub', 'Deep Search', 'Docker Services', 'Cloud Models'].map(feature => (
+          <span key={feature} style={{
+            padding: '6px 12px',
+            background: theme.bgTertiary,
+            borderRadius: '16px',
+            fontSize: '0.85rem',
+            color: theme.textMuted,
+          }}>
+            {feature}
+          </span>
+        ))}
+      </div>
+    </div>
   </div>
 );
 

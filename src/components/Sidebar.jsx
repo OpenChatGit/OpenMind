@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Play, Square, Zap, BookOpen, X, ChevronDown, ChevronRight, HardDrive, Cloud, Compass, User, LogIn, UserPlus, Mail, Lock, Eye, EyeOff, Camera, Upload } from 'lucide-react';
+import { Plus, MoreHorizontal, MoreVertical, PanelLeft, Pencil, Trash2, Check, LogOut, Settings, Play, Square, BookOpen, X, ChevronDown, ChevronRight, HardDrive, Cloud, Compass, User, LogIn, UserPlus, Mail, Lock, Eye, EyeOff, Camera, Upload } from 'lucide-react';
 import { SiOllama } from 'react-icons/si';
 import { FaDocker } from 'react-icons/fa';
 import { HuggingFace } from '@lobehub/icons';
@@ -20,7 +20,6 @@ const Sidebar = ({
   onOpenLoginModal,
   onHfLogout,
   onOpenSettings,
-  onOpenModelCreator
 }) => {
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -245,7 +244,6 @@ const Sidebar = ({
       zIndex: 10,
       position: 'relative',
       color: theme.text,
-      borderRight: `1px solid ${theme.border}`,
       transition: 'background 0.3s, color 0.3s'
     }}>
       {/* Top Header */}
@@ -464,103 +462,6 @@ const Sidebar = ({
             )}
           </div>
         ))}
-      </div>
-
-      {/* OpenMind Create Button */}
-      <button
-        onClick={onOpenModelCreator}
-        style={{
-          width: '100%',
-          padding: '8px 12px',
-          background: theme.bgActive,
-          border: 'none',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          marginBottom: '8px',
-          color: theme.text,
-          fontSize: '0.8rem',
-          transition: 'background 0.2s'
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = theme.bgHover}
-        onMouseLeave={(e) => e.currentTarget.style.background = theme.bgActive}
-      >
-        <Zap size={14} color={theme.accent} />
-        <span>OpenMind Create</span>
-      </button>
-
-      {/* Ollama Status */}
-      <div style={{
-        padding: '8px 12px',
-        fontSize: '0.75rem',
-        color: ollamaStatus === 'running' ? theme.success : theme.error,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        background: 'rgba(0,0,0,0.2)',
-        borderRadius: '6px',
-        marginBottom: '8px'
-      }}>
-        <SiOllama 
-          size={14} 
-          style={{
-            fill: ollamaStatus === 'running' ? theme.success : isStartingServer ? theme.warning : theme.error,
-            opacity: isStartingServer ? 0.6 : 1,
-            animation: isStartingServer ? 'pulse 1s infinite' : 'none'
-          }}
-        />
-        <span style={{ flex: 1 }}>
-          {ollamaStatus === 'running' 
-            ? 'Ollama Connected' 
-            : isStartingServer 
-              ? 'Starting...' 
-              : 'Ollama Disconnected'}
-        </span>
-        
-        {/* Start/Stop Button - only show if bundled Ollama is available */}
-        {ollamaServerStatus?.hasBundled && (
-          ollamaStatus === 'running' && ollamaServerStatus?.processRunning ? (
-            <button
-              onClick={handleStopServer}
-              title="Stop Ollama Server"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: theme.error,
-                cursor: 'pointer',
-                padding: '2px',
-                display: 'flex',
-                alignItems: 'center',
-                borderRadius: '4px'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = theme.errorBg}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <Square size={14} />
-            </button>
-          ) : ollamaStatus !== 'running' && !isStartingServer && (
-            <button
-              onClick={handleStartServer}
-              title="Start Ollama Server"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: theme.success,
-                cursor: 'pointer',
-                padding: '2px',
-                display: 'flex',
-                alignItems: 'center',
-                borderRadius: '4px'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = theme.successBg}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <Play size={14} />
-            </button>
-          )
-        )}
       </div>
 
       {/* Bottom Profile Section */}
@@ -1337,24 +1238,9 @@ const Sidebar = ({
                         {user?.subscription ? 'Pro' : 'Free'}
                       </div>
                       <div style={{ color: theme.textMuted, fontSize: '0.8rem' }}>
-                        {user?.subscription ? 'H200 GPU access enabled' : 'Upgrade for training features'}
+                        {user?.subscription ? 'H200 GPU access enabled' : 'Basic features'}
                       </div>
                     </div>
-                    {!user?.subscription && (
-                      <button
-                        onClick={() => {
-                          setShowAccountSettings(false);
-                          onOpenModelCreator?.();
-                        }}
-                        style={{
-                          padding: '6px 12px', background: isDark ? '#fff' : '#1a1a1a',
-                          border: 'none', borderRadius: '4px',
-                          color: isDark ? '#000' : '#fff', cursor: 'pointer', fontSize: '0.8rem',
-                        }}
-                      >
-                        Upgrade
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>

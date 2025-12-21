@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { 
   Code2, RefreshCw, Image, CheckCircle, Power, PowerOff,
   Globe, Zap, Package, ShieldCheck, Store, Download, Trash2
 } from 'lucide-react';
+import { getAPIPluginRegistry, getInstalledPlugins, invalidateCache } from '../utils/scanCache';
 
 // Fallback plugins if registry can't be loaded
 const FALLBACK_PLUGINS = [
@@ -273,6 +274,9 @@ const APIPlugins = ({ theme, isDark }) => {
   const [activeTab, setActiveTab] = useState('browse');
   const [enablingPlugin, setEnablingPlugin] = useState(null);
   const [installingPlugin, setInstallingPlugin] = useState(null);
+  
+  // Prevent double-loading
+  const loadedRef = useRef(false);
 
   // Resolve icon URL (relative to base or absolute)
   const resolveIconUrl = useCallback((url, baseUrl) => {
@@ -281,7 +285,7 @@ const APIPlugins = ({ theme, isDark }) => {
     return baseUrl ? `${baseUrl}${url}` : null;
   }, []);
 
-  // Get plugin icon URL based on theme
+  // Get plugin icon URL based on theme - memoize with iconsBaseUrl
   const getPluginIconUrl = useCallback((plugin) => {
     if (isDark && plugin.iconUrlDark) return resolveIconUrl(plugin.iconUrlDark, iconsBaseUrl);
     if (!isDark && plugin.iconUrlLight) return resolveIconUrl(plugin.iconUrlLight, iconsBaseUrl);
@@ -289,70 +293,53 @@ const APIPlugins = ({ theme, isDark }) => {
     return null;
   }, [isDark, iconsBaseUrl, resolveIconUrl]);
 
-  // Load plugins from registry (online or local fallback)
-  const loadPlugins = useCallback(async () => {
+  // Load plugins from registry using centralized cache
+  const loadPlugins = useCallback(async (force = false) => {
+    // Prevent double-loading unless forced
+    if (loadedRef.current && !force) return;
+    loadedRef.current = true;
+    
     setLoading(true);
     try {
-      // Try to load from electron API (which fetches from GitHub or local)
-      const result = await window.electronAPI?.loadAPIPluginRegistry?.();
+      // Use centralized cache for registry and installed plugins
+      const [registryResult, installedPluginIds] = await Promise.all([
+        getAPIPluginRegistry(force),
+        getInstalledPlugins(force),
+      ]);
       
-      // Check which plugins are actually installed (have code in plugins folder)
-      let actuallyInstalledIds = new Set();
-      let installCheckAvailable = false;
-      try {
-        const installedCheck = await window.electronAPI?.checkInstalledPlugins?.();
-        console.log('[APIPlugins] Installed check result:', installedCheck);
-        if (installedCheck?.success) {
-          installCheckAvailable = true;
-          actuallyInstalledIds = new Set(installedCheck.installedPluginIds || []);
-        }
-      } catch (e) {
-        console.warn('[APIPlugins] checkInstalledPlugins not available:', e);
-      }
-      
-      console.log('[APIPlugins] Install check available:', installCheckAvailable);
-      console.log('[APIPlugins] Actually installed plugin IDs:', [...actuallyInstalledIds]);
+      const actuallyInstalledIds = new Set(installedPluginIds || []);
+      const installCheckAvailable = installedPluginIds !== null;
       
       let plugins = FALLBACK_PLUGINS;
+      let iconsUrl = '';
       
-      if (result?.success && result.plugins?.length > 0) {
-        // Store icons base URL
-        if (result.iconsBaseUrl) {
-          setIconsBaseUrl(result.iconsBaseUrl);
-        }
+      if (registryResult?.plugins?.length > 0) {
+        iconsUrl = registryResult.iconsBaseUrl || '';
+        setIconsBaseUrl(iconsUrl);
         
         // Transform registry format to component format
-        // Mark plugins as "not installed" if they don't have code
-        plugins = result.plugins.map(p => ({
+        plugins = registryResult.plugins.map(p => ({
           ...p,
           type: p.type || 'native',
           requirements: p.requirements?.packages 
             ? [`Python ${p.requirements.python || '3.8+'}`, ...p.requirements.packages]
             : p.requirements,
-          // Plugin is only available if code exists in plugins folder
-          // If install check API is available, use it; otherwise assume installed (legacy behavior)
           notInstalled: installCheckAvailable ? !actuallyInstalledIds.has(p.id) : false,
         }));
       }
-      
-      console.log('[APIPlugins] Plugins with install status:', plugins.map(p => ({ id: p.id, notInstalled: p.notInstalled })));
       
       setAvailablePlugins(plugins);
       
       // Load enabled plugins from localStorage
       const enabledPluginIds = JSON.parse(localStorage.getItem('enabled-native-plugins') || '[]');
       
-      // Only show as "enabled" if:
-      // 1. Plugin exists in the registry
-      // 2. Plugin code is actually installed (if check is available)
+      // Only show as "enabled" if plugin exists and is installed
       const validEnabledIds = enabledPluginIds.filter(id => 
         plugins.some(p => p.id === id && !p.notInstalled)
       );
       
-      // Clean up localStorage if there are invalid plugin IDs (only if install check is available)
+      // Clean up localStorage if needed
       if (installCheckAvailable && validEnabledIds.length !== enabledPluginIds.length) {
-        console.log('[APIPlugins] Cleaning up invalid enabled plugins:', 
-          enabledPluginIds.filter(id => !validEnabledIds.includes(id)));
         localStorage.setItem('enabled-native-plugins', JSON.stringify(validEnabledIds));
       }
       
@@ -368,9 +355,10 @@ const APIPlugins = ({ theme, isDark }) => {
     }
   }, []);
 
+  // Load once on mount
   useEffect(() => {
     loadPlugins();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadPlugins]);
 
   // Enable/disable a native plugin
   const togglePlugin = useCallback(async (plugin) => {
@@ -419,13 +407,14 @@ const APIPlugins = ({ theme, isDark }) => {
     setInstallingPlugin(plugin.id);
     
     try {
-      console.log('[APIPlugins] Installing plugin:', plugin.id, 'from path:', plugin.path);
       const result = await window.electronAPI?.downloadPlugin?.(plugin.id, plugin.path);
       
       if (result?.success) {
-        console.log('[APIPlugins] Plugin installed successfully');
-        // Reload plugins to update the UI
-        await loadPlugins();
+        // Invalidate caches and reload
+        invalidateCache('installedPlugins');
+        invalidateCache('apiPluginRegistry');
+        loadedRef.current = false;
+        await loadPlugins(true);
       } else {
         console.error('[APIPlugins] Install failed:', result?.error);
         alert(`Failed to install plugin: ${result?.error || 'Unknown error'}`);
@@ -451,8 +440,6 @@ const APIPlugins = ({ theme, isDark }) => {
     }
     
     try {
-      console.log('[APIPlugins] Uninstalling plugin:', plugin.id);
-      
       // First disable if enabled
       const enabledPlugins = JSON.parse(localStorage.getItem('enabled-native-plugins') || '[]');
       if (enabledPlugins.includes(plugin.id)) {
@@ -463,9 +450,11 @@ const APIPlugins = ({ theme, isDark }) => {
       const result = await window.electronAPI?.uninstallPlugin?.(plugin.id, plugin.path);
       
       if (result?.success) {
-        console.log('[APIPlugins] Plugin uninstalled successfully');
-        // Reload plugins to update the UI
-        await loadPlugins();
+        // Invalidate caches and reload
+        invalidateCache('installedPlugins');
+        invalidateCache('apiPluginRegistry');
+        loadedRef.current = false;
+        await loadPlugins(true);
       } else {
         console.error('[APIPlugins] Uninstall failed:', result?.error);
         alert(`Failed to uninstall plugin: ${result?.error || 'Unknown error'}`);

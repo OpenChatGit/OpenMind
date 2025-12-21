@@ -6,5 +6,8 @@ export { useChatMessages } from './useChatMessages';
 export { usePlugins } from './usePlugins';
 export { usePluginUI } from './usePluginUI';
 
+// Plugin UI System Hooks
+export { usePluginSlot, usePluginEvent, usePluginState } from './usePluginSlot';
+
 // Legacy - kept for backwards compatibility
 export { useImageGeneration } from './useImageGeneration';

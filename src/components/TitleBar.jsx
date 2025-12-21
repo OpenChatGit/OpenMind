@@ -1,12 +1,23 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Minus, Square, X, Sun, Moon } from 'lucide-react';
+import { SiOllama } from 'react-icons/si';
 import DonationButton from './DonationButton';
 import { useTheme } from '../contexts/ThemeContext';
 
 const TitleBar = () => {
     const { theme, isDark, toggleThemeWithRipple } = useTheme();
     const [isMaximized, setIsMaximized] = useState(false);
+    const [ollamaStatus, setOllamaStatus] = useState('checking');
     const themeButtonRef = useRef(null);
+
+    // Check Ollama status
+    useEffect(() => {
+        if (window.electronAPI?.onOllamaStatus) {
+            window.electronAPI.onOllamaStatus((status) => {
+                setOllamaStatus(status);
+            });
+        }
+    }, []);
 
     const handleMinimize = () => {
         window.electronAPI?.minimize();
@@ -78,9 +89,32 @@ const TitleBar = () => {
                 height: '100%', 
                 alignItems: 'center', 
                 paddingRight: '8px', 
-                gap: '4px', 
+                gap: '8px', 
                 WebkitAppRegion: 'no-drag' 
             }}>
+                {/* Ollama Status Indicator */}
+                <div
+                    title={ollamaStatus === 'running' ? 'Ollama Connected' : 'Ollama Disconnected'}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '28px',
+                        height: '24px',
+                        borderRadius: '6px',
+                        background: ollamaStatus === 'running' 
+                            ? (isDark ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.1)')
+                            : 'transparent',
+                    }}
+                >
+                    <SiOllama 
+                        size={14} 
+                        style={{
+                            fill: ollamaStatus === 'running' ? theme.success : theme.textMuted,
+                        }}
+                    />
+                </div>
+
                 {/* Donation Button */}
                 <DonationButton />
                 

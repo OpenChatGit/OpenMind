@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "name": "OpenMind API Plugins",
-  "description": "Native JavaScript/Python plugins for OpenMind",
+  "description": "Native JavaScript/Python plugins for OpenMind with dynamic UI support",
   "repository": "https://github.com/OpenChatGit/OpenMindLabs-Plugins",
   "pluginsPath": "Plugins/",
   "iconsBaseUrl": "https://raw.githubusercontent.com/OpenChatGit/OpenMindLabs-Plugins/main/Plugins/icons/",
@@ -95,6 +95,35 @@
           "guidance": 7.5
         }
       ]
+    },
+    {
+      "id": "example-plugin",
+      "name": "Example Plugin",
+      "description": "Demonstrates the new dynamic UI plugin system. Shows how to add buttons, handle events, and interact with the chat.",
+      "version": "1.0.0",
+      "author": "OpenMindLabs",
+      "category": "tools",
+      "icon": "sparkles",
+      "type": "native",
+      "official": true,
+      "main": "index.js",
+      "path": "example-plugin",
+      "provides": ["ui-api"],
+      "ui": {
+        "slots": {
+          "chat-input-left": {
+            "type": "toggle-button",
+            "id": "example-toggle",
+            "icon": "Sparkles",
+            "tooltip": "Toggle Example Feature",
+            "stateKey": "exampleEnabled",
+            "priority": 70
+          }
+        }
+      },
+      "settings": {
+        "defaultEnabled": false
+      }
     }
   ],
   "categories": [
@@ -102,6 +131,18 @@
     { "id": "ai", "name": "AI & ML", "icon": "brain", "description": "Language models and AI tools" },
     { "id": "voice", "name": "Voice", "icon": "mic", "description": "Speech-to-text and text-to-speech" },
     { "id": "data", "name": "Data", "icon": "database", "description": "Databases and data processing" },
-    { "id": "tools", "name": "Tools", "icon": "wrench", "description": "Utilities and integrations" }
+    { "id": "tools", "name": "Tools", "icon": "wrench", "description": "Utilities and integrations" },
+    { "id": "ui", "name": "UI Extensions", "icon": "layout", "description": "User interface extensions and customizations" }
+  ],
+  "uiSlots": [
+    { "id": "chat-input-left", "name": "Chat Input Left", "description": "Left side of the chat input field" },
+    { "id": "chat-input-right", "name": "Chat Input Right", "description": "Right side of the chat input field" },
+    { "id": "chat-input-above", "name": "Chat Input Above", "description": "Above the chat input area" },
+    { "id": "chat-toolbar", "name": "Chat Toolbar", "description": "Main toolbar area" },
+    { "id": "sidebar-top", "name": "Sidebar Top", "description": "Top of the sidebar" },
+    { "id": "sidebar-bottom", "name": "Sidebar Bottom", "description": "Bottom of the sidebar" },
+    { "id": "message-actions", "name": "Message Actions", "description": "Actions on message bubbles" },
+    { "id": "settings-tab", "name": "Settings Tab", "description": "Custom settings tab" },
+    { "id": "model-selector", "name": "Model Selector", "description": "Model selection dropdown additions" }
   ]
 }
